@@ -116,9 +116,6 @@ export async function callWithBreaker(
   }
 
   // Are we in half-open (just passed the reopenAt threshold)?
-  const wasHalfOpen = !breakerStatus.open && pool.checkBreaker(userId).open === false;
-  // (checkBreaker returns open:false for both closed and half-open;
-  //  we track half-open by reading the internal state via the pool method)
   const isHalfOpen = isInHalfOpen(pool, userId);
 
   let client: GarminClient;
@@ -155,9 +152,6 @@ export async function callWithBreaker(
 
     return toolErrorResponse(userId, toolName, err);
   }
-
-  // suppress TS "not all paths return value" — unreachable
-  void wasHalfOpen;
 }
 
 /**

@@ -21,7 +21,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const auth = new GarminAuth(email, password, async () => {
+  const auth = new GarminAuth(email, password, undefined, async () => {
     console.error('\nMFA code required — check your email or authenticator app');
     return ask('MFA code: ');
   });
