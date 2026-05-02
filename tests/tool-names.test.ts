@@ -55,8 +55,32 @@ function buildMockPool(): ClientPool {
  * McpServer exposes registered tools via internal map — we access via the
  * public interface (tool catalog).
  */
+
 /**
- * Extract keys from an unknown internal map — handles both ES6 Map and plain Object.
+ * extractKeys — defensive accessor for McpServer._registeredTools
+ *
+ * BACKGROUND: We need to verify our static `ToolName` union covers every
+ * tool actually registered at runtime. The MCP SDK exposes registered
+ * tools via `McpServer._registeredTools` — note the leading underscore
+ * (private API).
+ *
+ * SDK QUIRK: As of @modelcontextprotocol/sdk v1.12.1 (pinned range ^1.12.1),
+ * this field is a plain JS Object (record-style), not an ES6 Map. On the SDK
+ * side, this could change to Map (or be renamed/removed entirely) without
+ * SemVer ceremony — it's marked private.
+ *
+ * THIS HELPER: handles both shapes safely. If `_registeredTools` is
+ * a Map, returns Array.from(map.keys()). If it's an Object, returns
+ * Object.keys(). If it's missing or some other shape, throws clearly.
+ *
+ * ON SDK BUMP — verify:
+ *   1. Does `_registeredTools` still exist on McpServer instances?
+ *   2. Is the shape still Object or Map (this helper handles both)?
+ *   3. If gone or unrecognized: search for a PUBLIC SDK API to enumerate
+ *      registered tools. If one exists, migrate to it (delete this helper).
+ *      Likely candidates: server.listTools(), server.toolNames, or similar.
+ *
+ * See FORK_PATCH.md "SDK Private API Dependency" for full context.
  */
 function extractKeys(obj: unknown): string[] {
   if (!obj) return [];

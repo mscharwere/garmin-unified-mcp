@@ -231,7 +231,7 @@ All Phase 2 files are new additions with zero upstream conflict risk.
 | File | Purpose |
 |------|---------|
 | `tests/compactors.test.ts` | 49 tests: byte-ratio CI gates (≤5% sleep, ≤20% activity, ≤10% activity_details, ≤70% general), shape assertions, snapshot tests, identity compactor verification, BAYMAX 8K + COLOSSUS 4K token budget tests, verbose=true round-trip |
-| `tests/tool-names.test.ts` | 3 tests: TOOL_NAMES has 97 entries, no duplicates, matches registered tools exactly |
+| `tests/tool-names.test.ts` | 3 tests: TOOL_NAMES has 97 entries, no duplicates, matches registered tools exactly (see "SDK Private API Dependency" section below) |
 | `tests/fixtures/get_sleep_data.full.json` | ~128KB realistic sleep payload (450 per-minute samples per time series) |
 | `tests/fixtures/get_activity.cardio.full.json` | ~6KB activity fixture with 9-lap splits (running) |
 | `tests/fixtures/get_activity.team-sport.full.json` | ~4KB activity fixture with 6-interval splits (soccer) |
@@ -257,6 +257,53 @@ All Phase 2 files are new additions with zero upstream conflict risk.
 
 **Purpose:** Upstream rebase resilience documentation (§8 Risk 3 mitigation).
 **Conflict risk:** Zero (new file).
+
+---
+
+## SDK Private API Dependency — `McpServer._registeredTools`
+
+**Scope:** `tests/tool-names.test.ts` — `extractKeys()` helper and `collectRegisteredToolNames()`
+**SDK version pinned:** `@modelcontextprotocol/sdk` `^1.12.1`
+**Risk class:** test-time fragility (does NOT affect runtime)
+
+### What we depend on
+
+The `tool-names.test.ts` invariant — that our static `ToolName` union covers every tool
+registered at runtime — relies on enumerating `McpServer._registeredTools`. The leading
+underscore is the SDK's "private" convention.
+
+### Why we depend on it
+
+Without runtime introspection, we'd have no way to assert that the `ToolName` union (and
+therefore the `compactors: Record<ToolName, Compactor>` exhaustiveness check) stays in sync
+with the actual registered tools when someone adds a new tool. This invariant is what makes
+the compactor system safe across upstream additions.
+
+### Current shape (SDK `^1.12.1`)
+
+`_registeredTools` is a plain JS Object whose keys are tool names.
+
+### Defensive helper
+
+`extractKeys()` in `tests/tool-names.test.ts` handles both Object and Map shapes. If the SDK
+migrates `_registeredTools` from Object to Map, the test continues to pass without changes.
+`collectRegisteredToolNames()` probes both `McpServer`-level and `_server`/`server` inner
+properties to handle class hierarchy changes.
+
+### What to verify on SDK upgrade
+
+1. `_registeredTools` still exists on `McpServer` instances → `extractKeys` still finds it
+2. Shape is Object OR Map → `extractKeys` still works without changes
+3. If `_registeredTools` was removed or renamed:
+   - Search the SDK changelog for a public alternative (e.g. `server.listTools()`,
+     `server.toolNames`, a public introspection method)
+   - Migrate `tool-names.test.ts` to the public API and delete `extractKeys`
+   - Update this section and the inline comment above `extractKeys`
+
+### Acceptable failure mode if SDK breaks compatibility
+
+The test fails loudly at CI; the production runtime is unaffected (this is test-only code).
+No silent runtime regression — the compact output pipeline and all registrars are untouched.
 
 ---
 
