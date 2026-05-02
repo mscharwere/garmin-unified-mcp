@@ -760,7 +760,7 @@ export class GarminClient {
   // Added as thin aliases to satisfy tests without changing upstream call semantics.
   // ---------------------------------------------------------------------------
 
-  /** Alias for getDailySummary — step data is part of the daily summary response. */
+  /** Backward-compat alias for getDailySummary. NIT 1 from Phase 1 review. */
   async getSteps(date?: string): Promise<unknown> {
     return this.getDailySummary(date);
   }

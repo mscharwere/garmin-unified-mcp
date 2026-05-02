@@ -44,12 +44,14 @@ function byteRatio(compact: unknown, full: unknown): number {
 }
 
 /**
- * applyVerbose simulates verbose=true by returning the full payload.
+ * applyVerbose simulates the MCP handler's verbose flag:
+ *   verbose=true  → return full payload (raw, identity)
+ *   verbose=false → return compactors[toolName](payload)
+ *
  * The MCP handler does: `verbose ? payload : compactors[toolName](payload)`
- * So verbose=true round-trip is just the identity.
  */
-function applyVerbose(full: unknown, verbose: boolean): unknown {
-  return verbose ? full : full; // both paths return full — verbose=true IS identity
+function applyVerbose(full: unknown, verbose: boolean, compactor: (x: unknown) => unknown): unknown {
+  return verbose ? full : compactor(full);
 }
 
 // ---------------------------------------------------------------------------
@@ -93,7 +95,15 @@ describe('get_sleep_data compactor', () => {
   });
 
   it('verbose=true round-trips full payload byte-identical', () => {
-    expect(JSON.stringify(full)).toEqual(JSON.stringify(applyVerbose(full, true)));
+    expect(JSON.stringify(full)).toEqual(JSON.stringify(applyVerbose(full, true, compactors.get_sleep_data)));
+  });
+
+  it('verbose=false returns compact output (different from full)', () => {
+    const compacted = applyVerbose(full, false, compactors.get_sleep_data);
+    // Compact output must differ from raw — if they were identical this would indicate a tautology
+    expect(JSON.stringify(compacted)).not.toEqual(JSON.stringify(full));
+    // And must equal the direct compactor output
+    expect(JSON.stringify(compacted)).toEqual(JSON.stringify(compactors.get_sleep_data(full)));
   });
 });
 

@@ -37,11 +37,15 @@ const identity: Compactor = (x: any) => x;
 const compactSleepData: Compactor = (full: any) => ({
   date: full?.dailySleepDTO?.calendarDate ?? null,
   sleepScore: full?.dailySleepDTO?.sleepScores?.overall?.value ?? null,
+  sleepStartTimestampLocal: full?.dailySleepDTO?.sleepStartTimestampLocal ?? null,
+  sleepEndTimestampLocal: full?.dailySleepDTO?.sleepEndTimestampLocal ?? null,
   sleepDurationMinutes: Math.round((full?.dailySleepDTO?.sleepTimeSeconds ?? 0) / 60),
   deepMinutes: Math.round((full?.dailySleepDTO?.deepSleepSeconds ?? 0) / 60),
   remMinutes: Math.round((full?.dailySleepDTO?.remSleepSeconds ?? 0) / 60),
   lightMinutes: Math.round((full?.dailySleepDTO?.lightSleepSeconds ?? 0) / 60),
   awakeMinutes: Math.round((full?.dailySleepDTO?.awakeSleepSeconds ?? 0) / 60),
+  deepQualifier: full?.dailySleepDTO?.sleepScores?.deepPercentage?.qualifierKey ?? null,
+  remQualifier: full?.dailySleepDTO?.sleepScores?.remPercentage?.qualifierKey ?? null,
   restingHR: full?.restingHeartRate ?? null,
   avgRespiration: full?.avgRespiration ?? null,
   avgHRV: full?.avgOvernightHrv ?? null,
@@ -71,6 +75,7 @@ function compactActivityRow(act: any): object {
     startTimeLocal: act?.startTimeLocal ?? null,
     durationMinutes: act?.duration != null ? Math.round(act.duration / 60) : null,
     distanceKm: act?.distance != null ? Math.round(act.distance / 10) / 100 : null,
+    averageSpeed: act?.averageSpeed ?? null,
     avgHR: act?.averageHR ?? null,
     maxHR: act?.maxHR ?? null,
     calories: act?.calories ?? null,
@@ -104,6 +109,7 @@ const compactActivity: Compactor = (full: any) => ({
   durationMinutes: full?.duration != null ? Math.round(full.duration / 60) : null,
   movingDurationMinutes: full?.movingDuration != null ? Math.round(full.movingDuration / 60) : null,
   distanceKm: full?.distance != null ? Math.round(full.distance / 10) / 100 : null,
+  averageSpeed: full?.averageSpeed ?? null,
   avgHR: full?.averageHR ?? null,
   maxHR: full?.maxHR ?? null,
   minHR: full?.minHR ?? null,
@@ -126,7 +132,6 @@ const compactActivity: Compactor = (full: any) => ({
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const compactActivityDetails: Compactor = (full: any) => {
   const act = full?.activityDetail?.activity ?? full?.activity ?? full;
-  const metrics = full?.golfSummary ?? null; // structural sentinel
   const metricDescriptors = full?.metricDescriptors;
   const metrics_list = full?.metrics;
 
@@ -151,8 +156,6 @@ const compactActivityDetails: Compactor = (full: any) => {
       hrZoneSeconds = [1, 2, 3, 4, 5].map((z) => zoneSums[z] ?? 0);
     }
   }
-
-  void metrics; // not used in compact shape
 
   return {
     activityId: act?.activityId ?? full?.activityId ?? null,

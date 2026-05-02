@@ -82,11 +82,23 @@ function buildMockPool(): ClientPool {
  *
  * See FORK_PATCH.md "SDK Private API Dependency" for full context.
  */
-function extractKeys(obj: unknown): string[] {
-  if (!obj) return [];
+/**
+ * extractKeys — defensive accessor for McpServer._registeredTools
+ *
+ * Returns null if the property is absent (falsy) — caller tries other candidate props.
+ * Returns string[] if the shape is Map or plain Object.
+ * Throws if the property exists but is an unrecognized non-null shape — CI must catch this.
+ *
+ * See FORK_PATCH.md "SDK Private API Dependency" for the upgrade procedure.
+ */
+function extractKeys(obj: unknown): string[] | null {
+  if (obj == null) return null; // absent — try next candidate
   if (obj instanceof Map) return Array.from(obj.keys());
   if (typeof obj === 'object') return Object.keys(obj as object);
-  return [];
+  throw new Error(
+    `extractKeys: _registeredTools exists but has unrecognized shape (got ${typeof obj}). ` +
+    'See FORK_PATCH.md "SDK Private API Dependency" for the upgrade procedure.',
+  );
 }
 
 function collectRegisteredToolNames(): string[] {
@@ -116,7 +128,7 @@ function collectRegisteredToolNames(): string[] {
   // Try McpServer-level properties first (most likely location)
   for (const prop of ['_registeredTools', '_tools', 'registeredTools']) {
     const keys = extractKeys(s[prop]);
-    if (keys.length > 0) return keys;
+    if (keys !== null && keys.length > 0) return keys;
   }
 
   // Try inner _server / server property (Server base class)
@@ -124,11 +136,17 @@ function collectRegisteredToolNames(): string[] {
   if (inner) {
     for (const prop of ['_registeredTools', '_tools', 'registeredTools']) {
       const keys = extractKeys(inner[prop]);
-      if (keys.length > 0) return keys;
+      if (keys !== null && keys.length > 0) return keys;
     }
   }
 
-  return [];
+  // No known property yielded tool names — SDK internals are gone.
+  // Throw loudly so CI catches the regression instead of silently passing.
+  throw new Error(
+    'collectRegisteredToolNames: _registeredTools (and all fallback props) are absent on ' +
+    'this McpServer instance. The SDK private API has been removed or renamed. ' +
+    'See FORK_PATCH.md "SDK Private API Dependency" for the upgrade procedure.',
+  );
 }
 
 describe('tool-names.ts', () => {
@@ -142,18 +160,8 @@ describe('tool-names.ts', () => {
   });
 
   it('ToolName union matches registered tools exactly', () => {
+    // collectRegisteredToolNames throws if SDK private API is gone — CI catches the regression.
     const registered = collectRegisteredToolNames();
-
-    if (registered.length === 0) {
-      // If we can't introspect the internal map, at minimum verify the count
-      // by registering and checking the snapshot count
-      console.warn(
-        'Could not introspect registered tool names from McpServer internals — ' +
-        'skipping exact-match assertion. TOOL_NAMES count check passed.',
-      );
-      expect(TOOL_NAMES.length).toBe(97);
-      return;
-    }
 
     const registeredSet = new Set(registered);
     const declaredSet = new Set(TOOL_NAMES);
