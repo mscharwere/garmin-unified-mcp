@@ -1,23 +1,148 @@
-# garmin-connect-mcp
+# garmin-unified-mcp
 
-MCP server for Garmin Connect. Access your fitness, health, and training data from Claude Code, Claude Desktop, Cursor, Windsurf, or any MCP client.
+**Fork of [Nicolasvegam/garmin-connect-mcp](https://github.com/Nicolasvegam/garmin-connect-mcp) — multi-user unified server.**
 
-**61 tools** across 7 categories: activities, daily health, trends, sleep, body composition, performance/training, and profile/devices.
+Single MCP process serving multiple Garmin accounts via a `GARMIN_USERS` credential pool. Each tool gains a required `user` enum parameter; token directories are isolated per user. Replaces the previous pattern of 3 separate MCP processes.
 
-API endpoints and authentication flow based on [`python-garminconnect`](https://github.com/cyberjunky/python-garminconnect) by [cyberjunky](https://github.com/cyberjunky).
+Architecture design: `C:/Jarvis/Team/TARS/garmin_unified_mcp_design.md`
+
+**97 tools** (16 activities, 14 health, 4 trends, 2 sleep, 7 range, 5 body, 1 snapshot, 4 training, 11 performance, 15 profile, 4 wellness, 6 challenges, 8 write)
+
+---
 
 ## Requirements
 
 - Node.js 20+
-- A Garmin Connect account (email and password)
+- Garmin Connect accounts (email + password per user)
+- MFA must be disabled on all accounts (see MFA Recovery below)
 
-## Installation
+## Configuration
 
-### Claude Code
+### Environment variables
+
+```jsonc
+// In .mcp.json
+"garmin": {
+  "command": "node",
+  "args": ["C:\\repos\\garmin-unified-mcp\\build\\index.js"],
+  "env": {
+    "GARMIN_USERS": "[{\"id\":\"carlos\",\"email\":\"carlos@example.com\",\"password\":\"...\"},{\"id\":\"carlitos\",\"email\":\"carlitos@example.com\",\"password\":\"...\"},{\"id\":\"daniel\",\"email\":\"daniel@example.com\",\"password\":\"...\"}]",
+    "GARMIN_TOKEN_ROOT": "C:\\Users\\mscha\\.garmin-mcp-unified"
+  }
+}
+```
+
+- `GARMIN_USERS` — JSON array of `{id, email, password}` objects. Each `id` becomes a valid `user` enum value in every tool.
+- `GARMIN_TOKEN_ROOT` — Base directory. Per-user token caches stored at `${GARMIN_TOKEN_ROOT}/${userId}/`.
+
+### Tool usage
+
+Every tool now requires a `user` argument:
+
+```
+# Before (3 separate servers)
+mcp__garmin__get_sleep_data(date: "2026-05-02")
+mcp__garmin-carlitos__get_sleep_data(date: "2026-05-02")
+
+# After (1 unified server)
+mcp__garmin__get_sleep_data(user: "carlos", date: "2026-05-02")
+mcp__garmin__get_sleep_data(user: "carlitos", date: "2026-05-02")
+```
+
+## Building
 
 ```bash
-claude mcp add garmin -e GARMIN_EMAIL=you@email.com -e GARMIN_PASSWORD=yourpass -- npx -y @nicolasvegam/garmin-connect-mcp
+npm install
+npm run build
+# Output: build/index.js
 ```
+
+---
+
+## MFA Recovery
+
+**If a Garmin account in this MCP starts failing with `MFA REQUIRED for user 'X'`, the recovery path is:**
+
+1. Sign into https://www.garmin.com/account/security with that user's credentials in a browser
+2. Disable MFA (TOTP / authenticator-app / SMS — whichever was turned on)
+3. Confirm via a fresh login that no MFA challenge appears
+4. Restart Claude Code (or call any tool for that user; lazy auth will re-prompt SSO)
+5. The token cache at `${GARMIN_TOKEN_ROOT}/${userId}/` will be repopulated automatically
+
+If MFA cannot be disabled (account policy, parental control), the user is permanently blocked from this MCP. v1.1 roadmap adds a `garmin_authenticate(code)` tool to support this case — currently upstream-contribution territory.
+
+**This MCP cannot complete login flows that require an MFA code.** The underlying auth library has no MFA flow.
+
+---
+
+## Disaster Recovery Runbook
+
+### Scenario: build/index.js missing or corrupted
+
+```bash
+cd C:/repos/garmin-unified-mcp
+git pull
+npm install
+npm run build
+# Verify: build/index.js exists
+```
+
+### Scenario: all token caches wiped (Garmin SSO re-auth needed)
+
+Token caches at `${GARMIN_TOKEN_ROOT}/${userId}/` auto-repopulate on the first tool call after restart. If SSO rate-limits trigger (3 rapid logins from same IP):
+- Stagger first-use calls across users by 2+ seconds between dispatches
+- Each user's first call triggers SSO; subsequent calls use cached OAuth2 token
+
+### Scenario: rollback to 3-MCP setup
+
+The original per-user MCP directories must still exist (keep for 1 week post-cutover):
+- `C:\Users\mscha\.garmin-mcp` (carlos)
+- `C:\Users\mscha\.garmin-mcp-carlitos` (carlitos)
+- `C:\Users\mscha\.garmin-mcp-daniel` (daniel)
+
+**Rollback steps:**
+1. Revert `C:/Jarvis/.mcp.json` to the 3-entry config (kept commented for rollback window)
+2. Restart Claude Code
+3. Verify `mcp__garmin__get_user_profile()` returns Carlos's profile from untouched cache
+
+**Note:** The token-cache copy in `${GARMIN_TOKEN_ROOT}/${userId}/` is a copy — originals remain untouched. Deletion of originals is one-way. Do not delete until rollback window expires (1 week minimum from cutover AND after BAYMAX morning + COLOSSUS post-game flows confirmed working with new MCP).
+
+### Scenario: `.mcp.json` env shape reference
+
+```jsonc
+{
+  "garmin": {
+    "command": "node",
+    "args": ["C:\\repos\\garmin-unified-mcp\\build\\index.js"],
+    "env": {
+      "GARMIN_USERS": "[{\"id\":\"carlos\",\"email\":\"...\",\"password\":\"...\"},{\"id\":\"carlitos\",\"email\":\"...\",\"password\":\"...\"},{\"id\":\"daniel\",\"email\":\"...\",\"password\":\"...\"}]",
+      "GARMIN_TOKEN_ROOT": "C:\\Users\\mscha\\.garmin-mcp-unified"
+    }
+  }
+}
+```
+
+### Scenario: circuit breaker stuck open for a user
+
+A user's circuit breaker opens after 3 auth failures in 60 seconds. It auto-recovers in 5 minutes (half-open → next call closes it). If the user's account has a genuine auth issue:
+1. Check the MFA recovery procedure above
+2. Check that password hasn't changed in Garmin Connect
+3. Delete the user's token cache dir: `rm -rf ${GARMIN_TOKEN_ROOT}/${userId}/`
+4. Restart Claude Code — lazy auth will re-authenticate from scratch
+
+---
+
+## Fork Maintenance
+
+This is a long-running fork. Upstream: `Nicolasvegam/garmin-connect-mcp`.
+
+**Monthly upstream sync cadence.** Tag sync commits `[upstream-sync]`. Every patch re-application should start with `FORK_PATCH.md` to identify conflict-prone files. See `FORK_PATCH.md` for the full list of modified lines.
+
+---
+
+## License
+
+MIT (upstream) — fork maintained at `mscharwere/garmin-unified-mcp`.
 
 ### Claude Desktop
 

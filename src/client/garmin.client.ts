@@ -102,8 +102,11 @@ function todayString(): string {
 export class GarminClient {
   private auth: GarminAuth;
 
-  constructor(email: string, password: string, promptMfa?: () => Promise<string>) {
-    this.auth = new GarminAuth(email, password, promptMfa);
+  // KAREN Phase 1 (2026-05-02): added tokenDir parameter, threaded through to GarminAuth.
+  // ClientPool passes ${GARMIN_TOKEN_ROOT}/${userId} for each user.
+  // setup.ts passes undefined → GarminAuth falls back to DEFAULT_TOKEN_DIR.
+  constructor(email: string, password: string, tokenDir?: string, promptMfa?: () => Promise<string>) {
+    this.auth = new GarminAuth(email, password, tokenDir, promptMfa);
   }
 
   private request<T>(endpoint: string, options?: RequestOptions): Promise<T> {
