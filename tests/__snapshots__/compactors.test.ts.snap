@@ -1,0 +1,188 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`get_activities compactor > matches committed snapshot 1`] = `
+[
+  {
+    "activityId": 19234567890,
+    "activityName": "Morning Run",
+    "activityType": "running",
+    "averageSpeed": 2.885,
+    "avgHR": 154,
+    "calories": 542,
+    "distanceKm": 8.24,
+    "durationMinutes": 48,
+    "maxHR": 181,
+    "startTimeLocal": "2026-04-26T07:30:00.0",
+    "trainingEffectAerobic": 3.4,
+    "trainingEffectAnaerobic": 2.1,
+    "trainingLoad": 134.5,
+  },
+  {
+    "activityId": 19345678901,
+    "activityName": "B14 Bothell A vs WPFC",
+    "activityType": "soccer",
+    "averageSpeed": 1.72,
+    "avgHR": 154,
+    "calories": 542,
+    "distanceKm": 6.4,
+    "durationMinutes": 62,
+    "maxHR": 191,
+    "startTimeLocal": "2026-04-26T09:30:00.0",
+    "trainingEffectAerobic": 3.4,
+    "trainingEffectAnaerobic": 2.1,
+    "trainingLoad": 134,
+  },
+]
+`;
+
+exports[`get_activity compactor (cardio fixture) > matches committed snapshot 1`] = `
+{
+  "activeCalories": 460,
+  "activityId": 19234567890,
+  "activityName": "Morning Run",
+  "activityType": "running",
+  "averageSpeed": 2.885,
+  "avgHR": 154,
+  "avgPower": null,
+  "avgRunCadence": null,
+  "calories": 542,
+  "device": "Forerunner 165",
+  "distanceKm": 8.24,
+  "durationMinutes": 48,
+  "elevationGainMeters": 42,
+  "maxHR": 181,
+  "minHR": 92,
+  "movingDurationMinutes": 47,
+  "startTimeLocal": "2026-04-26T07:30:00.0",
+  "trainingEffectAerobic": 3.4,
+  "trainingEffectAnaerobic": 2.1,
+  "trainingEffectLabel": "IMPROVING_FITNESS",
+  "trainingLoad": 134.5,
+  "vO2MaxValue": 52,
+  "weatherTempC": 14,
+}
+`;
+
+exports[`get_activity compactor (team-sport fixture) > matches committed snapshot 1`] = `
+{
+  "activeCalories": 470,
+  "activityId": 19345678901,
+  "activityName": "B14 Bothell A vs WPFC",
+  "activityType": "soccer",
+  "averageSpeed": 1.72,
+  "avgHR": 154,
+  "avgPower": null,
+  "avgRunCadence": null,
+  "calories": 542,
+  "device": "Forerunner 165",
+  "distanceKm": 6.4,
+  "durationMinutes": 62,
+  "elevationGainMeters": 12,
+  "maxHR": 191,
+  "minHR": 88,
+  "movingDurationMinutes": 58,
+  "startTimeLocal": "2026-04-26T09:30:00.0",
+  "trainingEffectAerobic": 3.4,
+  "trainingEffectAnaerobic": 2.1,
+  "trainingEffectLabel": "TEMPO",
+  "trainingLoad": 134,
+  "vO2MaxValue": null,
+  "weatherTempC": 14,
+}
+`;
+
+exports[`get_activity_details compactor (cardio fixture) > matches committed snapshot 1`] = `
+{
+  "activityId": 19234567890,
+  "metricSummary": {
+    "hrZoneTimeSeconds": null,
+    "powerZoneTimeSeconds": null,
+    "samplePeriodSeconds": 1,
+    "totalSamples": 2840,
+  },
+  "samplesAvailableViaVerbose": true,
+  "summaryFromActivity": {
+    "activeCalories": 460,
+    "activityId": 19234567890,
+    "activityName": "Morning Run",
+    "activityType": "running",
+    "averageSpeed": null,
+    "avgHR": 154,
+    "avgPower": null,
+    "avgRunCadence": null,
+    "calories": 542,
+    "device": "Forerunner 165",
+    "distanceKm": 8.24,
+    "durationMinutes": 48,
+    "elevationGainMeters": null,
+    "maxHR": 181,
+    "minHR": 92,
+    "movingDurationMinutes": 47,
+    "startTimeLocal": "2026-04-26T07:30:00.0",
+    "trainingEffectAerobic": 3.4,
+    "trainingEffectAnaerobic": 2.1,
+    "trainingEffectLabel": "IMPROVING_FITNESS",
+    "trainingLoad": 134.5,
+    "vO2MaxValue": 52,
+    "weatherTempC": null,
+  },
+}
+`;
+
+exports[`get_activity_details compactor (team-sport fixture) > matches committed snapshot 1`] = `
+{
+  "activityId": 19345678901,
+  "metricSummary": {
+    "hrZoneTimeSeconds": null,
+    "powerZoneTimeSeconds": null,
+    "samplePeriodSeconds": 1,
+    "totalSamples": 3480,
+  },
+  "samplesAvailableViaVerbose": true,
+  "summaryFromActivity": {
+    "activeCalories": 470,
+    "activityId": 19345678901,
+    "activityName": "B14 Bothell A vs WPFC",
+    "activityType": "soccer",
+    "averageSpeed": null,
+    "avgHR": 154,
+    "avgPower": null,
+    "avgRunCadence": null,
+    "calories": 542,
+    "device": "Forerunner 165",
+    "distanceKm": 6.4,
+    "durationMinutes": 62,
+    "elevationGainMeters": null,
+    "maxHR": 191,
+    "minHR": 88,
+    "movingDurationMinutes": 58,
+    "startTimeLocal": "2026-04-26T09:30:00.0",
+    "trainingEffectAerobic": 3.4,
+    "trainingEffectAnaerobic": 2.1,
+    "trainingEffectLabel": "TEMPO",
+    "trainingLoad": 134,
+    "vO2MaxValue": null,
+    "weatherTempC": null,
+  },
+}
+`;
+
+exports[`get_sleep_data compactor > matches committed snapshot 1`] = `
+{
+  "avgHRV": 52,
+  "avgRespiration": 14.3,
+  "awakeMinutes": 4,
+  "bodyBatteryDelta": 61,
+  "date": "2026-04-26",
+  "deepMinutes": 88,
+  "deepQualifier": "FAIR",
+  "lightMinutes": 251,
+  "remMinutes": 105,
+  "remQualifier": "GOOD",
+  "restingHR": 49,
+  "sleepDurationMinutes": 444,
+  "sleepEndTimestampLocal": 1745646240000,
+  "sleepScore": 79,
+  "sleepStartTimestampLocal": 1745619600000,
+}
+`;

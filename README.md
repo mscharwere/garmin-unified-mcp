@@ -49,12 +49,32 @@ mcp__garmin__get_sleep_data(user: "carlos", date: "2026-05-02")
 mcp__garmin__get_sleep_data(user: "carlitos", date: "2026-05-02")
 ```
 
+## Compact Output Mode
+
+All 97 tools return **compact payloads by default** (`verbose: false`). Compact output strips raw time-series data (GPS tracks, per-second HR, sleep movement arrays) and projects only the fields useful for briefings and analysis. Typical reductions:
+
+| Tool | Compact ratio | Example |
+|------|--------------|---------|
+| `get_sleep_data` | ~0.2% of full | 12 summary fields vs 450-row time-series arrays |
+| `get_activity_details` | ~0.3% of full | Activity summary + sample count vs thousands of GPS/HR samples |
+| `get_activity` | ~9–12% of full | Key stats vs full lap data |
+
+To get the raw upstream response byte-identical, pass `verbose: true`:
+
+```
+mcp__garmin__get_sleep_data(user: "carlos", date: "2026-05-02", verbose: true)
+```
+
+Identity compactors (no transformation) are used for write tools, device tools, gear tools, and `get_sleep_data_raw` — endpoints where the full payload IS the useful output.
+
+---
+
 ## Building
 
 ```bash
 npm install
-npm run build
-# Output: build/index.js
+npm run build    # Output: build/index.js
+npm test         # vitest unit tests (52 tests, ~400ms)
 ```
 
 ---
