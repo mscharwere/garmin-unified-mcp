@@ -1,7 +1,7 @@
 {
-  "name": "@nicolasvegam/garmin-connect-mcp",
-  "version": "1.1.0",
-  "description": "MCP server for Garmin Connect - access fitness, health and training data",
+  "name": "@mscharwere/garmin-unified-mcp",
+  "version": "1.0.0",
+  "description": "Unified multi-user MCP server for Garmin Connect — single server, N users via GARMIN_USERS pool",
   "type": "module",
   "bin": {
     "garmin-connect-mcp": "./build/index.js",

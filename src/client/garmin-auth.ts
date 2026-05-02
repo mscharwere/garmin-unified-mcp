@@ -1,3 +1,6 @@
+// KAREN Phase 1 (2026-05-02): removed module-scope TOKEN_DIR; tokenDir is now a
+// constructor parameter so each GarminAuth instance can have its own token directory.
+// See garmin_unified_mcp_design.md §2 (KAREN BLOCKER) and FORK_PATCH.md.
 import axios from 'axios';
 import { wrapper } from 'axios-cookiejar-support';
 import { CookieJar } from 'tough-cookie';
@@ -28,7 +31,10 @@ const TICKET_REGEX = /ticket=([^"]+)"/;
 const TITLE_REGEX = /<title>(.+?)<\/title>/;
 const SSO_VERIFY_MFA = 'https://sso.garmin.com/sso/verifyMFA/loginEnterMfaCode';
 
-const TOKEN_DIR = path.join(os.homedir(), '.garmin-mcp');
+// KAREN Phase 1 (2026-05-02): TOKEN_DIR module-scope constant removed.
+// tokenDir is now a per-instance private field set from the constructor parameter.
+// Default fallback used only when constructed without a tokenDir (e.g. setup.ts interactive flow).
+const DEFAULT_TOKEN_DIR = path.join(os.homedir(), '.garmin-mcp');
 const OAUTH1_TOKEN_FILE = 'oauth1_token.json';
 const OAUTH2_TOKEN_FILE = 'oauth2_token.json';
 const PROFILE_FILE = 'profile.json';
@@ -70,6 +76,9 @@ export type RequestOptions = {
 export class GarminAuth {
   private email: string;
   private password: string;
+  // KAREN Phase 1 (2026-05-02): tokenDir is now a per-instance field (was module-scope TOKEN_DIR).
+  // Each GarminAuth instance manages tokens in its own directory; no shared state across users.
+  private readonly tokenDir: string;
   private consumer: OAuthConsumer | null = null;
   private oauth1Token: OAuth1Token | null = null;
   private oauth2Token: OAuth2Token | null = null;
@@ -85,9 +94,13 @@ export class GarminAuth {
     return this.profile?.profileId ?? 0;
   }
 
-  constructor(email: string, password: string, promptMfa?: () => Promise<string>) {
+  // KAREN Phase 1 (2026-05-02): added tokenDir parameter (KAREN BLOCKER fix per §2).
+  // ClientPool passes ${GARMIN_TOKEN_ROOT}/${userId} for each user.
+  // setup.ts (interactive) passes undefined → falls back to DEFAULT_TOKEN_DIR for backward-compat.
+  constructor(email: string, password: string, tokenDir?: string, promptMfa?: () => Promise<string>) {
     this.email = email;
     this.password = password;
+    this.tokenDir = tokenDir ?? DEFAULT_TOKEN_DIR;
     this.promptMfa = promptMfa;
     this.loadTokens();
   }
@@ -406,10 +419,11 @@ export class GarminAuth {
   }
 
   private loadTokens(): void {
+    // KAREN Phase 1 (2026-05-02): uses this.tokenDir (per-instance) instead of module-scope TOKEN_DIR.
     try {
-      const oauth1Path = path.join(TOKEN_DIR, OAUTH1_TOKEN_FILE);
-      const oauth2Path = path.join(TOKEN_DIR, OAUTH2_TOKEN_FILE);
-      const profilePath = path.join(TOKEN_DIR, PROFILE_FILE);
+      const oauth1Path = path.join(this.tokenDir, OAUTH1_TOKEN_FILE);
+      const oauth2Path = path.join(this.tokenDir, OAUTH2_TOKEN_FILE);
+      const profilePath = path.join(this.tokenDir, PROFILE_FILE);
 
       if (fs.existsSync(oauth1Path)) {
         this.oauth1Token = JSON.parse(fs.readFileSync(oauth1Path, 'utf-8'));
@@ -428,27 +442,28 @@ export class GarminAuth {
   }
 
   private saveTokens(): void {
-    if (!fs.existsSync(TOKEN_DIR)) {
-      fs.mkdirSync(TOKEN_DIR, { recursive: true, mode: 0o700 });
+    // KAREN Phase 1 (2026-05-02): uses this.tokenDir (per-instance) instead of module-scope TOKEN_DIR.
+    if (!fs.existsSync(this.tokenDir)) {
+      fs.mkdirSync(this.tokenDir, { recursive: true, mode: 0o700 });
     }
 
     if (this.oauth1Token) {
       fs.writeFileSync(
-        path.join(TOKEN_DIR, OAUTH1_TOKEN_FILE),
+        path.join(this.tokenDir, OAUTH1_TOKEN_FILE),
         JSON.stringify(this.oauth1Token, null, 2),
         { mode: 0o600 },
       );
     }
     if (this.oauth2Token) {
       fs.writeFileSync(
-        path.join(TOKEN_DIR, OAUTH2_TOKEN_FILE),
+        path.join(this.tokenDir, OAUTH2_TOKEN_FILE),
         JSON.stringify(this.oauth2Token, null, 2),
         { mode: 0o600 },
       );
     }
     if (this.profile) {
       fs.writeFileSync(
-        path.join(TOKEN_DIR, PROFILE_FILE),
+        path.join(this.tokenDir, PROFILE_FILE),
         JSON.stringify(this.profile, null, 2),
         { mode: 0o600 },
       );

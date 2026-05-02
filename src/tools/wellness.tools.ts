@@ -1,60 +1,43 @@
+// KAREN Phase 1 (2026-05-02): refactored to take clientPool; user enum prepended.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { GarminClient } from '../client';
+import { z } from 'zod';
+import type { ClientPool } from '../client/client-pool.js';
 import { dateParamSchema, getMenstrualCalendarSchema } from '../dtos';
+import { callWithBreaker } from './tool-helpers.js';
 
-export function registerWellnessTools(server: McpServer, client: GarminClient): void {
+export function registerWellnessTools(server: McpServer, clientPool: ClientPool): void {
+  const userEnum = z.enum(clientPool.userEnum);
+
   server.registerTool(
     'get_menstrual_calendar_data',
     {
       description: 'Get menstrual cycle calendar data for a date range: cycle phases, predictions, symptoms',
-      inputSchema: getMenstrualCalendarSchema.shape,
+      inputSchema: { user: userEnum, ...getMenstrualCalendarSchema.shape },
     },
-    async ({ startDate, endDate }) => {
-      const data = await client.getMenstrualCalendar(startDate, endDate);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
-    },
+    async ({ user, startDate, endDate }) => callWithBreaker(clientPool, user, 'get_menstrual_calendar_data', (c) => c.getMenstrualCalendar(startDate, endDate)),
   );
 
   server.registerTool(
     'get_menstrual_data_for_date',
     {
       description: 'Get menstrual cycle day view for a specific date: current phase, symptoms, predictions',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getMenstrualDataForDate(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
-    },
+    async ({ user, date }) => callWithBreaker(clientPool, user, 'get_menstrual_data_for_date', (c) => c.getMenstrualDataForDate(date)),
   );
 
   server.registerTool(
     'get_pregnancy_summary',
-    {
-      description: 'Get pregnancy tracking summary data',
-    },
-    async () => {
-      const data = await client.getPregnancySummary();
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
-    },
+    { description: 'Get pregnancy tracking summary data', inputSchema: { user: userEnum } },
+    async ({ user }) => callWithBreaker(clientPool, user, 'get_pregnancy_summary', (c) => c.getPregnancySummary()),
   );
 
   server.registerTool(
     'get_lifestyle_logging_data',
     {
       description: 'Get daily lifestyle logging data for a date',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getLifestyleLoggingData(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
-    },
+    async ({ user, date }) => callWithBreaker(clientPool, user, 'get_lifestyle_logging_data', (c) => c.getLifestyleLoggingData(date)),
   );
 }

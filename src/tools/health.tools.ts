@@ -1,20 +1,24 @@
+// KAREN Phase 1 (2026-05-02): refactored to take clientPool; user enum prepended.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { GarminClient } from '../client';
+import { z } from 'zod';
+import type { ClientPool } from '../client/client-pool.js';
 import { dateParamSchema, dateRangeOptionalEndSchema } from '../dtos';
+import { callWithBreaker } from './tool-helpers.js';
 
-export function registerHealthTools(server: McpServer, client: GarminClient): void {
+export function registerHealthTools(server: McpServer, clientPool: ClientPool): void {
+  const userEnum = z.enum(clientPool.userEnum);
+
   server.registerTool(
     'get_daily_summary',
     {
       description:
         'Get full daily summary: steps, calories, distance, floors, active minutes, heart rate, stress, body battery',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getDailySummary(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, date }) => {
+      return callWithBreaker(clientPool, user, 'get_daily_summary', (client) =>
+        client.getDailySummary(date),
+      );
     },
   );
 
@@ -22,13 +26,12 @@ export function registerHealthTools(server: McpServer, client: GarminClient): vo
     'get_steps',
     {
       description: 'Get step count for a specific date',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getDailySummary(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, date }) => {
+      return callWithBreaker(clientPool, user, 'get_steps', (client) =>
+        client.getDailySummary(date),
+      );
     },
   );
 
@@ -36,13 +39,12 @@ export function registerHealthTools(server: McpServer, client: GarminClient): vo
     'get_steps_chart',
     {
       description: 'Get detailed intraday step data throughout the day (step chart)',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getStepsChart(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, date }) => {
+      return callWithBreaker(clientPool, user, 'get_steps_chart', (client) =>
+        client.getStepsChart(date),
+      );
     },
   );
 
@@ -51,13 +53,12 @@ export function registerHealthTools(server: McpServer, client: GarminClient): vo
     {
       description:
         'Get daily heart rate data: resting HR, max HR, min HR, and time series throughout the day',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getHeartRate(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, date }) => {
+      return callWithBreaker(clientPool, user, 'get_heart_rate', (client) =>
+        client.getHeartRate(date),
+      );
     },
   );
 
@@ -65,13 +66,12 @@ export function registerHealthTools(server: McpServer, client: GarminClient): vo
     'get_resting_heart_rate',
     {
       description: 'Get resting heart rate data for a specific date',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getRestingHeartRate(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, date }) => {
+      return callWithBreaker(clientPool, user, 'get_resting_heart_rate', (client) =>
+        client.getRestingHeartRate(date),
+      );
     },
   );
 
@@ -80,13 +80,12 @@ export function registerHealthTools(server: McpServer, client: GarminClient): vo
     {
       description:
         'Get daily stress levels: overall score, time in rest/low/medium/high stress, and time series. Single date; for ranges use get_stress_range',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getStress(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, date }) => {
+      return callWithBreaker(clientPool, user, 'get_stress', (client) =>
+        client.getStress(date),
+      );
     },
   );
 
@@ -95,13 +94,12 @@ export function registerHealthTools(server: McpServer, client: GarminClient): vo
     {
       description:
         'Get Body Battery energy levels: charged, drained, highest, lowest. endDate defaults to startDate if omitted',
-      inputSchema: dateRangeOptionalEndSchema.shape,
+      inputSchema: { user: userEnum, ...dateRangeOptionalEndSchema.shape },
     },
-    async ({ startDate, endDate }) => {
-      const data = await client.getBodyBattery(startDate, endDate ?? startDate);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, startDate, endDate }) => {
+      return callWithBreaker(clientPool, user, 'get_body_battery', (client) =>
+        client.getBodyBattery(startDate, endDate ?? startDate),
+      );
     },
   );
 
@@ -109,13 +107,12 @@ export function registerHealthTools(server: McpServer, client: GarminClient): vo
     'get_body_battery_events',
     {
       description: 'Get Body Battery charge and drain events for a day (what charged/drained your battery)',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getBodyBatteryEvents(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, date }) => {
+      return callWithBreaker(clientPool, user, 'get_body_battery_events', (client) =>
+        client.getBodyBatteryEvents(date),
+      );
     },
   );
 
@@ -123,13 +120,12 @@ export function registerHealthTools(server: McpServer, client: GarminClient): vo
     'get_respiration',
     {
       description: 'Get daily respiration rate data throughout the day. Single date; for ranges use get_respiration_range',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getRespiration(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, date }) => {
+      return callWithBreaker(clientPool, user, 'get_respiration', (client) =>
+        client.getRespiration(date),
+      );
     },
   );
 
@@ -137,13 +133,12 @@ export function registerHealthTools(server: McpServer, client: GarminClient): vo
     'get_spo2',
     {
       description: 'Get blood oxygen saturation (SpO2) data for a specific date. Single date; for ranges use get_spo2_range',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getSpO2(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, date }) => {
+      return callWithBreaker(clientPool, user, 'get_spo2', (client) =>
+        client.getSpO2(date),
+      );
     },
   );
 
@@ -151,13 +146,12 @@ export function registerHealthTools(server: McpServer, client: GarminClient): vo
     'get_intensity_minutes',
     {
       description: 'Get moderate and vigorous intensity minutes for a date',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getIntensityMinutes(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, date }) => {
+      return callWithBreaker(clientPool, user, 'get_intensity_minutes', (client) =>
+        client.getIntensityMinutes(date),
+      );
     },
   );
 
@@ -165,13 +159,12 @@ export function registerHealthTools(server: McpServer, client: GarminClient): vo
     'get_floors',
     {
       description: 'Get floors climbed chart data for a specific date',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getFloors(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, date }) => {
+      return callWithBreaker(clientPool, user, 'get_floors', (client) =>
+        client.getFloors(date),
+      );
     },
   );
 
@@ -179,13 +172,12 @@ export function registerHealthTools(server: McpServer, client: GarminClient): vo
     'get_hydration',
     {
       description: 'Get daily hydration data (water intake)',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getHydration(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, date }) => {
+      return callWithBreaker(clientPool, user, 'get_hydration', (client) =>
+        client.getHydration(date),
+      );
     },
   );
 
@@ -193,13 +185,12 @@ export function registerHealthTools(server: McpServer, client: GarminClient): vo
     'get_daily_events',
     {
       description: 'Get daily wellness events for a specific date',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getDailyEvents(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, date }) => {
+      return callWithBreaker(clientPool, user, 'get_daily_events', (client) =>
+        client.getDailyEvents(date),
+      );
     },
   );
 }

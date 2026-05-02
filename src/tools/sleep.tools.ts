@@ -1,20 +1,24 @@
+// KAREN Phase 1 (2026-05-02): refactored to take clientPool; user enum prepended.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { GarminClient } from '../client';
+import { z } from 'zod';
+import type { ClientPool } from '../client/client-pool.js';
 import { dateParamSchema } from '../dtos';
+import { callWithBreaker } from './tool-helpers.js';
 
-export function registerSleepTools(server: McpServer, client: GarminClient): void {
+export function registerSleepTools(server: McpServer, clientPool: ClientPool): void {
+  const userEnum = z.enum(clientPool.userEnum);
+
   server.registerTool(
     'get_sleep_data',
     {
       description:
         'Get detailed sleep data for a single night: duration, sleep stages (deep, light, REM, awake), sleep score, bed/wake times. For multiple nights use get_sleep_data_range',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getSleepData(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, date }) => {
+      return callWithBreaker(clientPool, user, 'get_sleep_data', (client) =>
+        client.getSleepData(date),
+      );
     },
   );
 
@@ -23,13 +27,12 @@ export function registerSleepTools(server: McpServer, client: GarminClient): voi
     {
       description:
         'Get raw sleep data directly from the wellness service with full detail including heart rate and SpO2 during sleep',
-      inputSchema: dateParamSchema.shape,
+      inputSchema: { user: userEnum, ...dateParamSchema.shape },
     },
-    async ({ date }) => {
-      const data = await client.getSleepDataRaw(date);
-      return {
-        content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
-      };
+    async ({ user, date }) => {
+      return callWithBreaker(clientPool, user, 'get_sleep_data_raw', (client) =>
+        client.getSleepDataRaw(date),
+      );
     },
   );
 }
