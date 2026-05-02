@@ -753,4 +753,20 @@ export class GarminClient {
       { method: 'PUT' },
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // Convenience aliases — NIT 1 fix (KAREN Phase 2, 2026-05-02)
+  // garmin.client.test.ts referenced these names; upstream uses different method names.
+  // Added as thin aliases to satisfy tests without changing upstream call semantics.
+  // ---------------------------------------------------------------------------
+
+  /** Alias for getDailySummary — step data is part of the daily summary response. */
+  async getSteps(date?: string): Promise<unknown> {
+    return this.getDailySummary(date);
+  }
+
+  /** Alias for getDailyWeighIns — returns the most recent day's weigh-in data. */
+  async getLatestWeight(): Promise<unknown> {
+    return this.getDailyWeighIns();
+  }
 }

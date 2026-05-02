@@ -1,6 +1,7 @@
 // KAREN Phase 1 (2026-05-02): refactored to take clientPool; user enum prepended.
+// KAREN Phase 2 (2026-05-02): converted to registerCompactedTool; verbose flag added.
+// All write tools use identity compactor (small ack payloads).
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
-import { z } from 'zod';
 import type { ClientPool } from '../client/client-pool.js';
 import {
   setActivityNameSchema,
@@ -11,63 +12,63 @@ import {
   setBloodPressureSchema,
   gearActivitySchema,
 } from '../dtos';
-import { callWithBreaker } from './tool-helpers.js';
+import { registerCompactedTool } from '../register-helpers.js';
 
 export function registerWriteTools(server: McpServer, clientPool: ClientPool): void {
-  const userEnum = z.enum(clientPool.userEnum);
-
-  server.registerTool(
-    'set_activity_name',
-    { description: 'Rename an activity', inputSchema: { user: userEnum, ...setActivityNameSchema.shape } },
-    async ({ user, activityId, name }) => callWithBreaker(clientPool, user, 'set_activity_name', (c) => c.setActivityName(activityId, name)),
+  registerCompactedTool(
+    server, clientPool, 'set_activity_name',
+    'Rename an activity',
+    setActivityNameSchema.shape,
+    (c, { activityId, name }) => c.setActivityName(activityId, name),
   );
 
-  server.registerTool(
-    'create_manual_activity',
-    {
-      description: 'Create a manual activity entry. Use get_activity_types to find valid activityTypeKey values',
-      inputSchema: { user: userEnum, ...createManualActivitySchema.shape },
-    },
-    async ({ user, activityName, activityTypeKey, startTimeInGMT, elapsedDurationInSecs, distanceInMeters }) =>
-      callWithBreaker(clientPool, user, 'create_manual_activity', (c) =>
-        c.createManualActivity({ activityName, activityTypeKey, startTimeInGMT, elapsedDurationInSecs, distanceInMeters }),
-      ),
+  registerCompactedTool(
+    server, clientPool, 'create_manual_activity',
+    'Create a manual activity entry. Use get_activity_types to find valid activityTypeKey values',
+    createManualActivitySchema.shape,
+    (c, { activityName, activityTypeKey, startTimeInGMT, elapsedDurationInSecs, distanceInMeters }) =>
+      c.createManualActivity({ activityName, activityTypeKey, startTimeInGMT, elapsedDurationInSecs, distanceInMeters }),
   );
 
-  server.registerTool(
-    'delete_activity',
-    { description: 'Delete an activity permanently. This action cannot be undone', inputSchema: { user: userEnum, ...deleteActivitySchema.shape } },
-    async ({ user, activityId }) => callWithBreaker(clientPool, user, 'delete_activity', (c) => c.deleteActivity(activityId)),
+  registerCompactedTool(
+    server, clientPool, 'delete_activity',
+    'Delete an activity permanently. This action cannot be undone',
+    deleteActivitySchema.shape,
+    (c, { activityId }) => c.deleteActivity(activityId),
   );
 
-  server.registerTool(
-    'add_weigh_in',
-    { description: 'Record a weight measurement', inputSchema: { user: userEnum, ...addWeighInSchema.shape } },
-    async ({ user, weight, unitKey, date }) => callWithBreaker(clientPool, user, 'add_weigh_in', (c) => c.addWeighIn(weight, unitKey ?? 'kg', date)),
+  registerCompactedTool(
+    server, clientPool, 'add_weigh_in',
+    'Record a weight measurement',
+    addWeighInSchema.shape,
+    (c, { weight, unitKey, date }) => c.addWeighIn(weight, unitKey ?? 'kg', date),
   );
 
-  server.registerTool(
-    'set_hydration',
-    { description: 'Set daily hydration intake in milliliters', inputSchema: { user: userEnum, ...setHydrationSchema.shape } },
-    async ({ user, valueMl, date }) => callWithBreaker(clientPool, user, 'set_hydration', (c) => c.setHydration(valueMl, date)),
+  registerCompactedTool(
+    server, clientPool, 'set_hydration',
+    'Set daily hydration intake in milliliters',
+    setHydrationSchema.shape,
+    (c, { valueMl, date }) => c.setHydration(valueMl, date),
   );
 
-  server.registerTool(
-    'set_blood_pressure',
-    { description: 'Record a blood pressure measurement with systolic, diastolic, and pulse', inputSchema: { user: userEnum, ...setBloodPressureSchema.shape } },
-    async ({ user, systolic, diastolic, pulse, timestamp, notes }) =>
-      callWithBreaker(clientPool, user, 'set_blood_pressure', (c) => c.setBloodPressure(systolic, diastolic, pulse, timestamp, notes)),
+  registerCompactedTool(
+    server, clientPool, 'set_blood_pressure',
+    'Record a blood pressure measurement with systolic, diastolic, and pulse',
+    setBloodPressureSchema.shape,
+    (c, { systolic, diastolic, pulse, timestamp, notes }) => c.setBloodPressure(systolic, diastolic, pulse, timestamp, notes),
   );
 
-  server.registerTool(
-    'add_gear_to_activity',
-    { description: 'Link a gear item (shoes, bike) to an activity', inputSchema: { user: userEnum, ...gearActivitySchema.shape } },
-    async ({ user, gearUuid, activityId }) => callWithBreaker(clientPool, user, 'add_gear_to_activity', (c) => c.addGearToActivity(gearUuid, activityId)),
+  registerCompactedTool(
+    server, clientPool, 'add_gear_to_activity',
+    'Link a gear item (shoes, bike) to an activity',
+    gearActivitySchema.shape,
+    (c, { gearUuid, activityId }) => c.addGearToActivity(gearUuid, activityId),
   );
 
-  server.registerTool(
-    'remove_gear_from_activity',
-    { description: 'Unlink a gear item from an activity', inputSchema: { user: userEnum, ...gearActivitySchema.shape } },
-    async ({ user, gearUuid, activityId }) => callWithBreaker(clientPool, user, 'remove_gear_from_activity', (c) => c.removeGearFromActivity(gearUuid, activityId)),
+  registerCompactedTool(
+    server, clientPool, 'remove_gear_from_activity',
+    'Unlink a gear item from an activity',
+    gearActivitySchema.shape,
+    (c, { gearUuid, activityId }) => c.removeGearFromActivity(gearUuid, activityId),
   );
 }
