@@ -241,24 +241,22 @@ Uses Garmin Connect credentials (email/password) via environment variables. OAut
 
 ### MFA (Multi-Factor Authentication)
 
-If your Garmin account has MFA enabled (required for devices with ECG capabilities), you need to run the interactive setup once before using the MCP server:
+This MCP does not support runtime MFA prompts. MFA-required accounts must either:
 
-```bash
-GARMIN_EMAIL='you@email.com' GARMIN_PASSWORD='yourpass' npx -y @nicolasvegam/garmin-connect-mcp setup
-```
+1. **Disable MFA** at the account level, then restart Claude Code — the token cache populates automatically on first tool call. See the [MFA Recovery](#mfa-recovery) section below.
+2. **Pre-populate tokens interactively** using this fork's setup tool:
+   ```bash
+   npm run setup
+   ```
+   This prompts for credentials and an MFA code, then saves OAuth tokens so the unified MCP can authenticate without a live prompt. Run it once per affected user; re-run if tokens expire.
 
-This will:
-1. Log in to Garmin Connect
-2. Prompt you for the MFA code sent to your email or authenticator app
-3. Save OAuth tokens to `~/.garmin-mcp/`
-
-After setup, the MCP server will use the saved tokens automatically — no MFA prompt needed until the tokens expire. When they do, simply run the setup command again.
+Runtime `garmin_authenticate(user, code)` support is on the v1.1 roadmap.
 
 ## Development
 
 ```bash
-git clone https://github.com/Nicolasvegam/garmin-connect-mcp.git
-cd garmin-connect-mcp
+git clone https://github.com/mscharwere/garmin-unified-mcp.git
+cd garmin-unified-mcp
 npm install
 npm run build
 ```
@@ -266,7 +264,9 @@ npm run build
 To test locally:
 
 ```bash
-GARMIN_EMAIL=you@email.com GARMIN_PASSWORD=yourpass npm start
+GARMIN_USERS='[{"id":"carlos","email":"you@example.com","password":"yourpass"}]' \
+  GARMIN_TOKEN_ROOT='./.garmin-tokens' \
+  npm start
 ```
 
 ## Credits
