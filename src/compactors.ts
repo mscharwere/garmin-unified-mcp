@@ -363,7 +363,7 @@ const compactBodyBattery: Compactor = (full: any) => {
     midnightValue,
     // DEPRECATED: wakeValue alias retained for one release; equals midnightValue (NOT the
     // real wake BB). Use get_body_battery_at_wake for sleep-event-joined correctness.
-    // Will be removed in a follow-up PR.
+    // Tracked for removal: https://github.com/mscharwere/garmin-unified-mcp/issues/4
     wakeValue: midnightValue,
     highestValue: values.length > 0 ? Math.max(...values) : null,
     lowestValue: values.length > 0 ? Math.min(...values) : null,
@@ -972,7 +972,10 @@ export const compactors: Record<ToolName, Compactor> = {
   get_stress: compactStress,
   get_body_battery: compactBodyBattery,
   get_body_battery_events: compactBodyBatteryEvents,
-  get_body_battery_at_wake: identity,        // pre-computed shape, no further compaction needed
+  // get_body_battery_at_wake uses identity because its output is already pre-computed:
+  // the sleep-event join is done upstream, so the result is a small fixed shape with no
+  // large arrays to strip — there is nothing for a compactor or verbose flag to expand or shrink.
+  get_body_battery_at_wake: identity,
   get_respiration: compactRespiration,
   get_spo2: compactSpo2,
   get_intensity_minutes: compactIntensityMinutes,

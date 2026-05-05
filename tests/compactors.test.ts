@@ -658,6 +658,131 @@ describe('get_body_battery_at_wake fixture shape — estimated_from_lowest confi
   });
 });
 
+// ---------------------------------------------------------------------------
+// get_body_battery_at_wake — longest-duration sleep event selection
+// KAREN fix/wake-value-correctness follow-up (2026-05-05)
+//
+// Verifies the selection algorithm introduced in the BLOCKER fix:
+//   - Two sleep events (nap + overnight): overnight (longer) must win
+//   - Tie-break: latest end timestamp wins
+//   - Single match: used directly
+//   - Zero matches: falls back to estimated_from_lowest
+// ---------------------------------------------------------------------------
+
+/** Inline replica of the selection algorithm in health.tools.ts for isolated unit testing */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function selectLongestSleepEvent(events: any[]): any | undefined {
+  const sleepEvents = events.filter(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (e: any) => typeof e?.eventType === 'string' && e.eventType.toLowerCase().includes('sleep'),
+  );
+  if (sleepEvents.length === 0) return undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return sleepEvents.reduce((best: any, candidate: any) => {
+    const bestDur = best?.durationInSeconds ?? 0;
+    const candDur = candidate?.durationInSeconds ?? 0;
+    if (candDur > bestDur) return candidate;
+    if (candDur === bestDur) {
+      const bestEnd = best?.endTimestampGMT
+        ? new Date(best.endTimestampGMT).getTime()
+        : (best?.startTimestampGMT
+          ? new Date(best.startTimestampGMT).getTime() + (bestDur * 1000)
+          : 0);
+      const candEnd = candidate?.endTimestampGMT
+        ? new Date(candidate.endTimestampGMT).getTime()
+        : (candidate?.startTimestampGMT
+          ? new Date(candidate.startTimestampGMT).getTime() + (candDur * 1000)
+          : 0);
+      return candEnd > bestEnd ? candidate : best;
+    }
+    return best;
+  });
+}
+
+describe('get_body_battery_at_wake — sleep event selection algorithm', () => {
+  const nap = {
+    eventType: 'SLEEP',
+    startTimestampGMT: '2026-05-05T15:00:00.000Z', // 8 AM PT nap
+    endTimestampGMT: '2026-05-05T16:00:00.000Z',   // 9 AM PT nap end
+    durationInSeconds: 3600, // 1 hour
+  };
+  const overnight = {
+    eventType: 'sleep',  // lowercase variant — filter must be case-insensitive
+    startTimestampGMT: '2026-05-05T04:00:00.000Z', // 9 PM PT prev night
+    endTimestampGMT: '2026-05-05T13:40:00.000Z',   // 6:40 AM PT wake
+    durationInSeconds: 34800, // ~9.67 hours
+  };
+  const nonSleep = {
+    eventType: 'ACTIVITY',
+    startTimestampGMT: '2026-05-05T18:00:00.000Z',
+    durationInSeconds: 7200,
+  };
+
+  it('picks overnight over nap when overnight is longer', () => {
+    const result = selectLongestSleepEvent([nap, overnight, nonSleep]);
+    expect(result).toBe(overnight);
+    expect(result.durationInSeconds).toBe(34800);
+  });
+
+  it('picks overnight even when nap appears first in array', () => {
+    // Array order must not determine winner — duration does
+    const result = selectLongestSleepEvent([nap, overnight]);
+    expect(result).toBe(overnight);
+  });
+
+  it('picks overnight even when overnight appears first in array', () => {
+    const result = selectLongestSleepEvent([overnight, nap]);
+    expect(result).toBe(overnight);
+  });
+
+  it('uses end timestamp from the selected overnight event (the real wake timestamp basis)', () => {
+    const result = selectLongestSleepEvent([nap, overnight]);
+    expect(result?.endTimestampGMT).toBe('2026-05-05T13:40:00.000Z');
+    // Confirm this is different from the nap end
+    expect(result?.endTimestampGMT).not.toBe(nap.endTimestampGMT);
+  });
+
+  it('single event is returned directly without error', () => {
+    const result = selectLongestSleepEvent([overnight]);
+    expect(result).toBe(overnight);
+  });
+
+  it('returns undefined when no sleep events present', () => {
+    const result = selectLongestSleepEvent([nonSleep]);
+    expect(result).toBeUndefined();
+  });
+
+  it('returns undefined for empty array', () => {
+    const result = selectLongestSleepEvent([]);
+    expect(result).toBeUndefined();
+  });
+
+  it('tie-break by latest end timestamp: later-ending event wins', () => {
+    const earlyLong = {
+      eventType: 'sleep',
+      startTimestampGMT: '2026-05-05T01:00:00.000Z',
+      endTimestampGMT: '2026-05-05T09:00:00.000Z',
+      durationInSeconds: 28800, // 8h, ends earlier
+    };
+    const lateLong = {
+      eventType: 'sleep',
+      startTimestampGMT: '2026-05-05T03:00:00.000Z',
+      endTimestampGMT: '2026-05-05T11:00:00.000Z',
+      durationInSeconds: 28800, // also 8h, ends later
+    };
+    const result = selectLongestSleepEvent([earlyLong, lateLong]);
+    expect(result).toBe(lateLong);
+    expect(result?.endTimestampGMT).toBe('2026-05-05T11:00:00.000Z');
+  });
+
+  it('filters non-sleep events regardless of duration', () => {
+    const longActivity = { eventType: 'ACTIVITY', durationInSeconds: 999999 };
+    const result = selectLongestSleepEvent([longActivity, nap]);
+    // nap must win even though longActivity has more seconds
+    expect(result).toBe(nap);
+  });
+});
+
 describe('COLOSSUS post-game compact token budget', () => {
   it('4-endpoint compact payload sum ≤ 4000 tokens (chars as proxy)', () => {
     const activityCompact = compactors.get_activity(activityTeamSportFull);

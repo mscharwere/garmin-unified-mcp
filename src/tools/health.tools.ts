@@ -148,7 +148,10 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
         args.user,
         'get_body_battery_at_wake',
         async (client) => {
-          const resolvedDate = args.date ?? new Date().toISOString().split('T')[0];
+          // Default to today in PT — avoids the UTC "tomorrow" bug for Carlos/Carlitos/Daniel
+          // between 00:00–07:00 UTC (5 PM–midnight PT the prior calendar day).
+          const resolvedDate = args.date ??
+            new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date());
 
           // Fire both requests in parallel — independent endpoints
           const [bbRaw, eventsRaw] = await Promise.all([
@@ -178,13 +181,43 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             : (eventsRaw as any)?.events ?? [];
 
-          // Find the sleep event: look for eventType containing 'sleep' (case-insensitive),
-          // or if not found, the event with the longest duration ending in morning hours.
+          // Find the sleep event: collect all events whose eventType contains 'sleep'
+          // (case-insensitive), then pick the one with the longest duration so that a
+          // short mid-day nap can never beat an overnight session when Garmin returns
+          // multiple sleep events in the array.  Tie-break: latest end timestamp (most
+          // recent sleep wins over an equally-long older one).  Single match uses the
+          // same code path with no extra overhead.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const sleepEvent = events.find((e: any) =>
+          const sleepEvents = events.filter((e: any) =>
             typeof e?.eventType === 'string' &&
             e.eventType.toLowerCase().includes('sleep'),
           );
+
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let sleepEvent: any | undefined;
+          if (sleepEvents.length > 0) {
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            sleepEvent = sleepEvents.reduce((best: any, candidate: any) => {
+              const bestDur = best?.durationInSeconds ?? 0;
+              const candDur = candidate?.durationInSeconds ?? 0;
+              if (candDur > bestDur) return candidate;
+              if (candDur === bestDur) {
+                // Tie-break: latest end timestamp
+                const bestEnd = best?.endTimestampGMT
+                  ? new Date(best.endTimestampGMT).getTime()
+                  : (best?.startTimestampGMT
+                    ? new Date(best.startTimestampGMT).getTime() + (bestDur * 1000)
+                    : 0);
+                const candEnd = candidate?.endTimestampGMT
+                  ? new Date(candidate.endTimestampGMT).getTime()
+                  : (candidate?.startTimestampGMT
+                    ? new Date(candidate.startTimestampGMT).getTime() + (candDur * 1000)
+                    : 0);
+                return candEnd > bestEnd ? candidate : best;
+              }
+              return best;
+            });
+          }
 
           // ---- No sleep event → fallback path ----
           if (!sleepEvent) {
