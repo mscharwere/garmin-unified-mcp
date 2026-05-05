@@ -150,8 +150,8 @@ function collectRegisteredToolNames(): string[] {
 }
 
 describe('tool-names.ts', () => {
-  it('TOOL_NAMES has 97 entries', () => {
-    expect(TOOL_NAMES.length).toBe(97);
+  it('TOOL_NAMES has 98 entries', () => {
+    expect(TOOL_NAMES.length).toBe(98);
   });
 
   it('TOOL_NAMES has no duplicates', () => {

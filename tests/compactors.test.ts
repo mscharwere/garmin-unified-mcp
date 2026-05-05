@@ -361,7 +361,12 @@ describe('non-identity compactors — smoke tests with minimal fixtures', () => 
     const full = [{ date: '2026-04-26', bodyBatteryValuesArray: bodyBatteryValues }];
     const compact = compactors.get_body_battery(full);
     expect(byteRatio(compact, full)).toBeLessThan(TOLERANCE);
+    // midnightValue is the 00:00 boundary reading (values[0])
+    expect('midnightValue' in compact).toBe(true);
+    expect(compact.midnightValue).toBe(22); // first entry's bb value
+    // wakeValue is a deprecated alias for midnightValue (NOT actual wake BB)
     expect('wakeValue' in compact).toBe(true);
+    expect(compact.wakeValue).toBe(compact.midnightValue); // alias must equal midnightValue
     expect('highestValue' in compact).toBe(true);
     expect('lowestValue' in compact).toBe(true);
     expect('endOfDayValue' in compact).toBe(true);
@@ -587,6 +592,71 @@ describe('BAYMAX morning-briefing compact token budget', () => {
 // COLOSSUS post-game compact token budget
 // §10 acceptance criterion: 4 COLOSSUS endpoints ≤ 4,000 tokens (compact)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// get_body_battery_at_wake — fixture shape tests
+// KAREN fix/wake-value-correctness (2026-05-05)
+//
+// get_body_battery_at_wake uses the `identity` compactor because the tool itself
+// performs the sleep-event join and returns a pre-computed shape (not a raw upstream
+// payload). These tests validate the expected output shapes for both confidence paths.
+//
+// Confirmed real-world case: 2026-05-05 Carlos.
+//   midnightValue (values[0]) = 32 — the 00:00 boundary reading
+//   actual wake BB = 71 — derived from sleep event end ~13:40 UTC = 6:40 AM PT
+// ---------------------------------------------------------------------------
+
+import wakeAtWakeSleepEvent from './fixtures/get_body_battery_at_wake.sleep_event.json';
+import wakeAtWakeFallback from './fixtures/get_body_battery_at_wake.fallback.json';
+
+describe('get_body_battery_at_wake fixture shape — sleep_event confidence', () => {
+  const fixture = wakeAtWakeSleepEvent;
+
+  it('has required fields', () => {
+    expect(fixture.date).toBeDefined();
+    expect(fixture.user).toBeDefined();
+    expect(fixture.wakeValue).toBeDefined();
+    expect(fixture.confidence).toBe('sleep_event');
+    expect(fixture.wakeTimestamp).toBeDefined();
+  });
+
+  it('wakeValue matches expected real-world case (71, not midnight 32)', () => {
+    expect(fixture.wakeValue).toBe(71);
+  });
+
+  it('wakeTimestamp is around 13:40 UTC (6:40 AM PT)', () => {
+    const ts = new Date(fixture.wakeTimestamp as string).getTime();
+    // Sleep end timestamp should be between 13:00 and 14:30 UTC on 2026-05-05
+    const lower = new Date('2026-05-05T13:00:00.000Z').getTime();
+    const upper = new Date('2026-05-05T14:30:00.000Z').getTime();
+    expect(ts).toBeGreaterThanOrEqual(lower);
+    expect(ts).toBeLessThanOrEqual(upper);
+  });
+
+  it('identity compactor round-trips the shape unchanged', () => {
+    // get_body_battery_at_wake uses identity compactor — shape is already compact
+    const compacted = compactors.get_body_battery_at_wake(fixture);
+    expect(JSON.stringify(compacted)).toEqual(JSON.stringify(fixture));
+  });
+});
+
+describe('get_body_battery_at_wake fixture shape — estimated_from_lowest confidence', () => {
+  const fixture = wakeAtWakeFallback;
+
+  it('has required fields', () => {
+    expect(fixture.date).toBeDefined();
+    expect(fixture.user).toBeDefined();
+    expect('wakeValue' in fixture).toBe(true);
+    expect(fixture.confidence).toBe('estimated_from_lowest');
+    expect(fixture.wakeTimestamp).toBeNull();
+    expect(fixture.caveat).toBeDefined();
+  });
+
+  it('identity compactor round-trips the shape unchanged', () => {
+    const compacted = compactors.get_body_battery_at_wake(fixture);
+    expect(JSON.stringify(compacted)).toEqual(JSON.stringify(fixture));
+  });
+});
 
 describe('COLOSSUS post-game compact token budget', () => {
   it('4-endpoint compact payload sum ≤ 4000 tokens (chars as proxy)', () => {
