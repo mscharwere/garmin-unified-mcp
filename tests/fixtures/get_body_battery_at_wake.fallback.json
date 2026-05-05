@@ -1,0 +1,9 @@
+{
+  "_comment": "Fixture: fallback case — no sleep event returned. wakeValue = lowestValue heuristic.",
+  "date": "2026-05-05",
+  "user": "carlos",
+  "wakeTimestamp": null,
+  "wakeValue": 28,
+  "confidence": "estimated_from_lowest",
+  "caveat": "No sleep event returned by get_body_battery_events for this date. wakeValue is the intraday lowest BB (heuristic proxy for post-sleep nadir). Re-run after sync or use get_body_battery_events to investigate."
+}

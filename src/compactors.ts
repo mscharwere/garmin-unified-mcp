@@ -326,7 +326,18 @@ const compactStress: Compactor = (full: any) => ({
   highStressMinutes: full?.highStressDuration != null ? Math.round(full.highStressDuration / 60) : null,
 });
 
-/** get_body_battery — ~95% reduction (drop per-3-min samples) */
+/** get_body_battery — ~95% reduction (drop per-3-min samples)
+ *
+ * KAREN fix/wake-value-correctness (2026-05-05):
+ *   CORRECTED FIELD: `midnightValue` is the honest name for bodyBatteryValuesArray[0].
+ *   That entry is the 00:00 calendar-boundary reading, NOT the wake BB value.
+ *   Confirmed by today's case: midnightValue=32 vs actual wake BB=71.
+ *
+ *   DEPRECATED: `wakeValue` is retained as a backwards-compat alias equal to `midnightValue`
+ *   for one release so existing COLOSSUS/BAYMAX prompts don't break during the shim period.
+ *   It will be removed in a follow-up PR. Consumers should call `get_body_battery_at_wake`
+ *   instead for the correct sleep-event-joined wake value.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const compactBodyBattery: Compactor = (full: any) => {
   const items = Array.isArray(full) ? full : [full];
@@ -345,9 +356,15 @@ const compactBodyBattery: Compactor = (full: any) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ? day.bodyBatteryValuesArray.map((v: any) => v?.[1]).filter((v: any) => v != null)
     : [];
+  // midnightValue: the 00:00 calendar-boundary BB (honest name for values[0])
+  const midnightValue = values.length > 0 ? values[0] : null;
   return {
     date: day?.date ?? null,
-    wakeValue: values.length > 0 ? values[0] : null,
+    midnightValue,
+    // DEPRECATED: wakeValue alias retained for one release; equals midnightValue (NOT the
+    // real wake BB). Use get_body_battery_at_wake for sleep-event-joined correctness.
+    // Tracked for removal: https://github.com/mscharwere/garmin-unified-mcp/issues/4
+    wakeValue: midnightValue,
     highestValue: values.length > 0 ? Math.max(...values) : null,
     lowestValue: values.length > 0 ? Math.min(...values) : null,
     endOfDayValue: values.length > 0 ? values[values.length - 1] : null,
@@ -955,6 +972,10 @@ export const compactors: Record<ToolName, Compactor> = {
   get_stress: compactStress,
   get_body_battery: compactBodyBattery,
   get_body_battery_events: compactBodyBatteryEvents,
+  // get_body_battery_at_wake uses identity because its output is already pre-computed:
+  // the sleep-event join is done upstream, so the result is a small fixed shape with no
+  // large arrays to strip — there is nothing for a compactor or verbose flag to expand or shrink.
+  get_body_battery_at_wake: identity,
   get_respiration: compactRespiration,
   get_spo2: compactSpo2,
   get_intensity_minutes: compactIntensityMinutes,

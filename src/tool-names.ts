@@ -41,6 +41,7 @@ export const HEALTH_TOOL_NAMES = [
   'get_stress',
   'get_body_battery',
   'get_body_battery_events',
+  'get_body_battery_at_wake',
   'get_respiration',
   'get_spo2',
   'get_intensity_minutes',

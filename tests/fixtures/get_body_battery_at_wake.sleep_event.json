@@ -1,0 +1,8 @@
+{
+  "_comment": "Fixture: 2026-05-05 Carlos. Confirmed by BAYMAX investigation. Sleep end ~13:40 UTC = 6:40 AM PT. midnightValue=32, wakeValue=71.",
+  "date": "2026-05-05",
+  "user": "carlos",
+  "wakeTimestamp": "2026-05-05T13:42:00.000Z",
+  "wakeValue": 71,
+  "confidence": "sleep_event"
+}

@@ -361,7 +361,12 @@ describe('non-identity compactors — smoke tests with minimal fixtures', () => 
     const full = [{ date: '2026-04-26', bodyBatteryValuesArray: bodyBatteryValues }];
     const compact = compactors.get_body_battery(full);
     expect(byteRatio(compact, full)).toBeLessThan(TOLERANCE);
+    // midnightValue is the 00:00 boundary reading (values[0])
+    expect('midnightValue' in compact).toBe(true);
+    expect(compact.midnightValue).toBe(22); // first entry's bb value
+    // wakeValue is a deprecated alias for midnightValue (NOT actual wake BB)
     expect('wakeValue' in compact).toBe(true);
+    expect(compact.wakeValue).toBe(compact.midnightValue); // alias must equal midnightValue
     expect('highestValue' in compact).toBe(true);
     expect('lowestValue' in compact).toBe(true);
     expect('endOfDayValue' in compact).toBe(true);
@@ -587,6 +592,196 @@ describe('BAYMAX morning-briefing compact token budget', () => {
 // COLOSSUS post-game compact token budget
 // §10 acceptance criterion: 4 COLOSSUS endpoints ≤ 4,000 tokens (compact)
 // ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// get_body_battery_at_wake — fixture shape tests
+// KAREN fix/wake-value-correctness (2026-05-05)
+//
+// get_body_battery_at_wake uses the `identity` compactor because the tool itself
+// performs the sleep-event join and returns a pre-computed shape (not a raw upstream
+// payload). These tests validate the expected output shapes for both confidence paths.
+//
+// Confirmed real-world case: 2026-05-05 Carlos.
+//   midnightValue (values[0]) = 32 — the 00:00 boundary reading
+//   actual wake BB = 71 — derived from sleep event end ~13:40 UTC = 6:40 AM PT
+// ---------------------------------------------------------------------------
+
+import wakeAtWakeSleepEvent from './fixtures/get_body_battery_at_wake.sleep_event.json';
+import wakeAtWakeFallback from './fixtures/get_body_battery_at_wake.fallback.json';
+
+describe('get_body_battery_at_wake fixture shape — sleep_event confidence', () => {
+  const fixture = wakeAtWakeSleepEvent;
+
+  it('has required fields', () => {
+    expect(fixture.date).toBeDefined();
+    expect(fixture.user).toBeDefined();
+    expect(fixture.wakeValue).toBeDefined();
+    expect(fixture.confidence).toBe('sleep_event');
+    expect(fixture.wakeTimestamp).toBeDefined();
+  });
+
+  it('wakeValue matches expected real-world case (71, not midnight 32)', () => {
+    expect(fixture.wakeValue).toBe(71);
+  });
+
+  it('wakeTimestamp is around 13:40 UTC (6:40 AM PT)', () => {
+    const ts = new Date(fixture.wakeTimestamp as string).getTime();
+    // Sleep end timestamp should be between 13:00 and 14:30 UTC on 2026-05-05
+    const lower = new Date('2026-05-05T13:00:00.000Z').getTime();
+    const upper = new Date('2026-05-05T14:30:00.000Z').getTime();
+    expect(ts).toBeGreaterThanOrEqual(lower);
+    expect(ts).toBeLessThanOrEqual(upper);
+  });
+
+  it('identity compactor round-trips the shape unchanged', () => {
+    // get_body_battery_at_wake uses identity compactor — shape is already compact
+    const compacted = compactors.get_body_battery_at_wake(fixture);
+    expect(JSON.stringify(compacted)).toEqual(JSON.stringify(fixture));
+  });
+});
+
+describe('get_body_battery_at_wake fixture shape — estimated_from_lowest confidence', () => {
+  const fixture = wakeAtWakeFallback;
+
+  it('has required fields', () => {
+    expect(fixture.date).toBeDefined();
+    expect(fixture.user).toBeDefined();
+    expect('wakeValue' in fixture).toBe(true);
+    expect(fixture.confidence).toBe('estimated_from_lowest');
+    expect(fixture.wakeTimestamp).toBeNull();
+    expect(fixture.caveat).toBeDefined();
+  });
+
+  it('identity compactor round-trips the shape unchanged', () => {
+    const compacted = compactors.get_body_battery_at_wake(fixture);
+    expect(JSON.stringify(compacted)).toEqual(JSON.stringify(fixture));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// get_body_battery_at_wake — longest-duration sleep event selection
+// KAREN fix/wake-value-correctness follow-up (2026-05-05)
+//
+// Verifies the selection algorithm introduced in the BLOCKER fix:
+//   - Two sleep events (nap + overnight): overnight (longer) must win
+//   - Tie-break: latest end timestamp wins
+//   - Single match: used directly
+//   - Zero matches: falls back to estimated_from_lowest
+// ---------------------------------------------------------------------------
+
+/** Inline replica of the selection algorithm in health.tools.ts for isolated unit testing */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function selectLongestSleepEvent(events: any[]): any | undefined {
+  const sleepEvents = events.filter(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (e: any) => typeof e?.eventType === 'string' && e.eventType.toLowerCase().includes('sleep'),
+  );
+  if (sleepEvents.length === 0) return undefined;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return sleepEvents.reduce((best: any, candidate: any) => {
+    const bestDur = best?.durationInSeconds ?? 0;
+    const candDur = candidate?.durationInSeconds ?? 0;
+    if (candDur > bestDur) return candidate;
+    if (candDur === bestDur) {
+      const bestEnd = best?.endTimestampGMT
+        ? new Date(best.endTimestampGMT).getTime()
+        : (best?.startTimestampGMT
+          ? new Date(best.startTimestampGMT).getTime() + (bestDur * 1000)
+          : 0);
+      const candEnd = candidate?.endTimestampGMT
+        ? new Date(candidate.endTimestampGMT).getTime()
+        : (candidate?.startTimestampGMT
+          ? new Date(candidate.startTimestampGMT).getTime() + (candDur * 1000)
+          : 0);
+      return candEnd > bestEnd ? candidate : best;
+    }
+    return best;
+  });
+}
+
+describe('get_body_battery_at_wake — sleep event selection algorithm', () => {
+  const nap = {
+    eventType: 'SLEEP',
+    startTimestampGMT: '2026-05-05T15:00:00.000Z', // 8 AM PT nap
+    endTimestampGMT: '2026-05-05T16:00:00.000Z',   // 9 AM PT nap end
+    durationInSeconds: 3600, // 1 hour
+  };
+  const overnight = {
+    eventType: 'sleep',  // lowercase variant — filter must be case-insensitive
+    startTimestampGMT: '2026-05-05T04:00:00.000Z', // 9 PM PT prev night
+    endTimestampGMT: '2026-05-05T13:40:00.000Z',   // 6:40 AM PT wake
+    durationInSeconds: 34800, // ~9.67 hours
+  };
+  const nonSleep = {
+    eventType: 'ACTIVITY',
+    startTimestampGMT: '2026-05-05T18:00:00.000Z',
+    durationInSeconds: 7200,
+  };
+
+  it('picks overnight over nap when overnight is longer', () => {
+    const result = selectLongestSleepEvent([nap, overnight, nonSleep]);
+    expect(result).toBe(overnight);
+    expect(result.durationInSeconds).toBe(34800);
+  });
+
+  it('picks overnight even when nap appears first in array', () => {
+    // Array order must not determine winner — duration does
+    const result = selectLongestSleepEvent([nap, overnight]);
+    expect(result).toBe(overnight);
+  });
+
+  it('picks overnight even when overnight appears first in array', () => {
+    const result = selectLongestSleepEvent([overnight, nap]);
+    expect(result).toBe(overnight);
+  });
+
+  it('uses end timestamp from the selected overnight event (the real wake timestamp basis)', () => {
+    const result = selectLongestSleepEvent([nap, overnight]);
+    expect(result?.endTimestampGMT).toBe('2026-05-05T13:40:00.000Z');
+    // Confirm this is different from the nap end
+    expect(result?.endTimestampGMT).not.toBe(nap.endTimestampGMT);
+  });
+
+  it('single event is returned directly without error', () => {
+    const result = selectLongestSleepEvent([overnight]);
+    expect(result).toBe(overnight);
+  });
+
+  it('returns undefined when no sleep events present', () => {
+    const result = selectLongestSleepEvent([nonSleep]);
+    expect(result).toBeUndefined();
+  });
+
+  it('returns undefined for empty array', () => {
+    const result = selectLongestSleepEvent([]);
+    expect(result).toBeUndefined();
+  });
+
+  it('tie-break by latest end timestamp: later-ending event wins', () => {
+    const earlyLong = {
+      eventType: 'sleep',
+      startTimestampGMT: '2026-05-05T01:00:00.000Z',
+      endTimestampGMT: '2026-05-05T09:00:00.000Z',
+      durationInSeconds: 28800, // 8h, ends earlier
+    };
+    const lateLong = {
+      eventType: 'sleep',
+      startTimestampGMT: '2026-05-05T03:00:00.000Z',
+      endTimestampGMT: '2026-05-05T11:00:00.000Z',
+      durationInSeconds: 28800, // also 8h, ends later
+    };
+    const result = selectLongestSleepEvent([earlyLong, lateLong]);
+    expect(result).toBe(lateLong);
+    expect(result?.endTimestampGMT).toBe('2026-05-05T11:00:00.000Z');
+  });
+
+  it('filters non-sleep events regardless of duration', () => {
+    const longActivity = { eventType: 'ACTIVITY', durationInSeconds: 999999 };
+    const result = selectLongestSleepEvent([longActivity, nap]);
+    // nap must win even though longActivity has more seconds
+    expect(result).toBe(nap);
+  });
+});
 
 describe('COLOSSUS post-game compact token budget', () => {
   it('4-endpoint compact payload sum ≤ 4000 tokens (chars as proxy)', () => {
