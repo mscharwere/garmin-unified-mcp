@@ -1,0 +1,44 @@
+[
+  {
+    "_fixture_meta": {
+      "captured": "2026-05-06",
+      "user": "carlos",
+      "note": "Real upstream response. Event is wrapped: e.event.eventType, e.event.eventStartTimeGmt, e.event.durationInMilliseconds. No endTimestampGMT or durationInSeconds. bodyBatteryValuesArray here is [ts, status, level, version] (4-tuple) — distinct from get_body_battery which returns [ts, level] (2-tuple)."
+    },
+    "event": {
+      "eventType": "SLEEP",
+      "eventStartTimeGmt": "2026-05-06T06:19:07.0",
+      "timezoneOffset": -25200000,
+      "durationInMilliseconds": 27060000,
+      "bodyBatteryImpact": 50,
+      "feedbackType": "NONE",
+      "shortFeedback": "NONE"
+    },
+    "activityName": null,
+    "activityType": null,
+    "activityId": null,
+    "averageStress": 19.486841,
+    "stressValueDescriptorsDTOList": [
+      { "index": 0, "key": "timestamp" },
+      { "index": 1, "key": "stressLevel" }
+    ],
+    "stressValuesArray": [
+      [1778048280000, 23],
+      [1778048460000, 20],
+      [1778075460000, 26]
+    ],
+    "bodyBatteryValueDescriptorsDTOList": [
+      { "bodyBatteryValueDescriptorIndex": 0, "bodyBatteryValueDescriptorKey": "timestamp" },
+      { "bodyBatteryValueDescriptorIndex": 1, "bodyBatteryValueDescriptorKey": "bodyBatteryStatus" },
+      { "bodyBatteryValueDescriptorIndex": 2, "bodyBatteryValueDescriptorKey": "bodyBatteryLevel" },
+      { "bodyBatteryValueDescriptorIndex": 3, "bodyBatteryValueDescriptorKey": "bodyBatteryVersion" }
+    ],
+    "bodyBatteryValuesArray": [
+      [1778048280000, "MEASURED", 25, 3],
+      [1778049900000, "MEASURED", 27, 3],
+      [1778071860000, "MEASURED", 71, 3],
+      [1778074920000, "MEASURED", 75, 3],
+      [1778075460000, "MEASURED", 75, 3]
+    ]
+  }
+]

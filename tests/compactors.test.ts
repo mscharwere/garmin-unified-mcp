@@ -407,21 +407,27 @@ describe('non-identity compactors — smoke tests with minimal fixtures', () => 
     expect(compact.length).toBe(3);
   });
 
-  it('get_training_readiness reduces bytes by ≥30%', () => {
+  it('get_training_readiness reduces bytes by ≥30% (legacy trainingReadinessDTOList shape)', () => {
+    // Legacy shape: { trainingReadinessDTOList: [...] } — kept for safety even though
+    // live upstream returns a bare array. Real field names use *FactorPercent suffix.
     const full = {
       trainingReadinessDTOList: [
         {
           calendarDate: '2026-04-26',
           score: 79,
           level: 'GOOD',
-          feedbackLong: 'Your body is ready for a moderate effort.',
+          feedbackLong: 'YOUR_BODY_READY',
           sleepScore: 79,
-          sleepHistoryFactor: 1,
-          recoveryTimeFactor: 1,
-          hrvFactor: 0,
+          // TR-2: real field names — *FactorPercent suffix
+          sleepHistoryFactorPercent: 82,
+          recoveryTimeFactorPercent: 95,
+          hrvFactorPercent: 55,
           hrvWeeklyAverage: 52,
-          acuteLoadFactor: -1,
-          stressHistoryFactor: 0,
+          // acwrFactorPercent = acute:chronic workload ratio (NOT acuteLoadFactor)
+          acwrFactorPercent: 100,
+          stressHistoryFactorPercent: 78,
+          validSleep: true,
+          inputContext: 'AFTER_WAKEUP_RESET',
           // UI bloat
           displayedScore: 79,
           startTimestampGMT: '2026-04-26 00:00:00',
@@ -437,6 +443,7 @@ describe('non-identity compactors — smoke tests with minimal fixtures', () => 
           userProfilePK: 12345678,
           levelDisplayName: 'GOOD',
           levelColor: '#00BB00',
+          timestamp: '2026-04-26T13:00:00.0',
         },
       ],
     };
@@ -445,6 +452,12 @@ describe('non-identity compactors — smoke tests with minimal fixtures', () => 
     expect(compact.score).toBe(79);
     expect(compact.level).toBe('GOOD');
     expect(compact.hrvWeeklyAverage).toBe(52);
+    expect(compact.sleepHistoryFactorPercent).toBe(82);
+    expect(compact.recoveryTimeFactorPercent).toBe(95);
+    expect(compact.hrvFactorPercent).toBe(55);
+    expect(compact.acwrFactorPercent).toBe(100);
+    expect(compact.inputContext).toBe('AFTER_WAKEUP_RESET');
+    expect(compact.validSleep).toBe(true);
   });
 
   it('get_stress reduces bytes by ≥30%', () => {
@@ -557,18 +570,23 @@ describe('BAYMAX morning-briefing compact token budget', () => {
     const bcCompact = compactors.get_body_composition(bcFull);
 
     const trFull = {
+      // TR-1: real upstream uses legacy wrapper shape here for budget test
       trainingReadinessDTOList: [{
         calendarDate: '2026-04-26',
         score: 79,
         level: 'GOOD',
-        feedbackLong: 'Your body is ready for a moderate effort.',
+        feedbackLong: 'YOUR_BODY_READY',
         sleepScore: 79,
-        sleepHistoryFactor: 1,
-        recoveryTimeFactor: 1,
-        hrvFactor: 0,
+        // TR-2: real field names use *FactorPercent suffix
+        sleepHistoryFactorPercent: 82,
+        recoveryTimeFactorPercent: 95,
+        hrvFactorPercent: 55,
         hrvWeeklyAverage: 52,
-        acuteLoadFactor: -1,
-        stressHistoryFactor: 0,
+        acwrFactorPercent: 100,
+        stressHistoryFactorPercent: 78,
+        validSleep: true,
+        inputContext: 'AFTER_WAKEUP_RESET',
+        timestamp: '2026-04-26T13:00:00.0',
       }],
     };
     const trCompact = compactors.get_training_readiness(trFull);
@@ -610,6 +628,11 @@ import wakeAtWakeSleepEvent from './fixtures/get_body_battery_at_wake.sleep_even
 import wakeAtWakeFallback from './fixtures/get_body_battery_at_wake.fallback.json';
 
 describe('get_body_battery_at_wake fixture shape — sleep_event confidence', () => {
+  // Real-world case: 2026-05-06 Carlos.
+  // Sleep event: eventStartTimeGmt=06:19:07 UTC + durationInMilliseconds=27060000ms
+  //   → sleepEnd = 13:49:07 UTC = 6:49 AM PT
+  // Closest BB sample: 1778074920000 (13:48:40 UTC) = level 75.
+  // midnightValue for this day is 27 — confirming sleep_event join is not the midnight reading.
   const fixture = wakeAtWakeSleepEvent;
 
   it('has required fields', () => {
@@ -620,15 +643,17 @@ describe('get_body_battery_at_wake fixture shape — sleep_event confidence', ()
     expect(fixture.wakeTimestamp).toBeDefined();
   });
 
-  it('wakeValue matches expected real-world case (71, not midnight 32)', () => {
-    expect(fixture.wakeValue).toBe(71);
+  it('wakeValue matches expected real-world case (75) — NOT the midnight reading (27)', () => {
+    expect(fixture.wakeValue).toBe(75);
   });
 
-  it('wakeTimestamp is around 13:40 UTC (6:40 AM PT)', () => {
+  it('wakeTimestamp is around 13:51 UTC (6:51 AM PT) on 2026-05-06', () => {
     const ts = new Date(fixture.wakeTimestamp as string).getTime();
-    // Sleep end timestamp should be between 13:00 and 14:30 UTC on 2026-05-05
-    const lower = new Date('2026-05-05T13:00:00.000Z').getTime();
-    const upper = new Date('2026-05-05T14:30:00.000Z').getTime();
+    // Sleep start: parseGmt("2026-05-06T06:19:07.0") = 06:19:07 UTC
+    // Sleep end: 06:19:07 UTC + 27060000ms (7h31m) = 13:50:07 UTC = 6:50 AM PT
+    // Closest BB sample: 13:51:00 UTC (53s diff) — within 2 min window
+    const lower = new Date('2026-05-06T13:48:00.000Z').getTime();
+    const upper = new Date('2026-05-06T13:54:00.000Z').getTime();
     expect(ts).toBeGreaterThanOrEqual(lower);
     expect(ts).toBeLessThanOrEqual(upper);
   });
@@ -640,14 +665,18 @@ describe('get_body_battery_at_wake fixture shape — sleep_event confidence', ()
   });
 });
 
-describe('get_body_battery_at_wake fixture shape — estimated_from_lowest confidence', () => {
+describe('get_body_battery_at_wake fixture shape — unavailable confidence (BB-4 fix)', () => {
+  // BB-4: the old "estimated_from_lowest" heuristic is killed. Recovery nights have
+  // their BB nadir pre-bed or mid-night, not at wake. Returning null is more honest.
   const fixture = wakeAtWakeFallback;
 
   it('has required fields', () => {
     expect(fixture.date).toBeDefined();
     expect(fixture.user).toBeDefined();
     expect('wakeValue' in fixture).toBe(true);
-    expect(fixture.confidence).toBe('estimated_from_lowest');
+    // BB-4: wakeValue must be null when no sleep event is found (not estimated)
+    expect(fixture.wakeValue).toBeNull();
+    expect(fixture.confidence).toBe('unavailable');
     expect(fixture.wakeTimestamp).toBeNull();
     expect(fixture.caveat).toBeDefined();
   });
@@ -669,9 +698,26 @@ describe('get_body_battery_at_wake fixture shape — estimated_from_lowest confi
 //   - Zero matches: falls back to estimated_from_lowest
 // ---------------------------------------------------------------------------
 
-/** Inline replica of the selection algorithm in health.tools.ts for isolated unit testing */
+/**
+ * parseGmt: force Garmin "*Gmt" timestamp strings to UTC.
+ * Garmin emits ISO-8601 without timezone suffix — JS would parse as local time.
+ * Appending 'Z' forces UTC. Replicated from health.tools.ts for test isolation.
+ */
+function parseGmt(s: string): number {
+  if (s.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(s)) return new Date(s).getTime();
+  return new Date(s.replace(/\.\d+$/, '') + 'Z').getTime();
+}
+
+/**
+ * Inline replica of the selection algorithm in health.tools.ts for isolated unit testing.
+ * BB-1/BB-2/BB-3 fix: events are unwrapped (e.event ?? e), use durationInMilliseconds,
+ * and compute end from parseGmt(eventStartTimeGmt) + durationInMilliseconds.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function selectLongestSleepEvent(events: any[]): any | undefined {
+function selectLongestSleepEvent(rawEvents: any[]): any | undefined {
+  // BB-1: unwrap nested event shape
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const events = rawEvents.map((e: any) => e?.event ?? e);
   const sleepEvents = events.filter(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (e: any) => typeof e?.eventType === 'string' && e.eventType.toLowerCase().includes('sleep'),
@@ -679,49 +725,48 @@ function selectLongestSleepEvent(events: any[]): any | undefined {
   if (sleepEvents.length === 0) return undefined;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return sleepEvents.reduce((best: any, candidate: any) => {
-    const bestDur = best?.durationInSeconds ?? 0;
-    const candDur = candidate?.durationInSeconds ?? 0;
-    if (candDur > bestDur) return candidate;
-    if (candDur === bestDur) {
-      const bestEnd = best?.endTimestampGMT
-        ? new Date(best.endTimestampGMT).getTime()
-        : (best?.startTimestampGMT
-          ? new Date(best.startTimestampGMT).getTime() + (bestDur * 1000)
-          : 0);
-      const candEnd = candidate?.endTimestampGMT
-        ? new Date(candidate.endTimestampGMT).getTime()
-        : (candidate?.startTimestampGMT
-          ? new Date(candidate.startTimestampGMT).getTime() + (candDur * 1000)
-          : 0);
+    // BB-2: use durationInMilliseconds (not durationInSeconds)
+    const bestDurMs = best?.durationInMilliseconds ?? 0;
+    const candDurMs = candidate?.durationInMilliseconds ?? 0;
+    if (candDurMs > bestDurMs) return candidate;
+    if (candDurMs === bestDurMs) {
+      // BB-3: use parseGmt(eventStartTimeGmt) — forces UTC, not startTimestampGMT
+      const bestEnd = best?.eventStartTimeGmt
+        ? parseGmt(best.eventStartTimeGmt) + bestDurMs
+        : 0;
+      const candEnd = candidate?.eventStartTimeGmt
+        ? parseGmt(candidate.eventStartTimeGmt) + candDurMs
+        : 0;
       return candEnd > bestEnd ? candidate : best;
     }
     return best;
   });
 }
 
-describe('get_body_battery_at_wake — sleep event selection algorithm', () => {
+describe('get_body_battery_at_wake — sleep event selection algorithm (real field names post BB-1/2/3)', () => {
+  // Events use real upstream field names: eventStartTimeGmt + durationInMilliseconds.
+  // The selectLongestSleepEvent function above unwraps e.event ?? e before filtering.
   const nap = {
     eventType: 'SLEEP',
-    startTimestampGMT: '2026-05-05T15:00:00.000Z', // 8 AM PT nap
-    endTimestampGMT: '2026-05-05T16:00:00.000Z',   // 9 AM PT nap end
-    durationInSeconds: 3600, // 1 hour
+    eventStartTimeGmt: '2026-05-05T15:00:00.000Z', // 8 AM PT nap start
+    durationInMilliseconds: 3600000, // 1 hour in ms
   };
   const overnight = {
     eventType: 'sleep',  // lowercase variant — filter must be case-insensitive
-    startTimestampGMT: '2026-05-05T04:00:00.000Z', // 9 PM PT prev night
-    endTimestampGMT: '2026-05-05T13:40:00.000Z',   // 6:40 AM PT wake
-    durationInSeconds: 34800, // ~9.67 hours
+    eventStartTimeGmt: '2026-05-05T04:00:00.000Z', // 9 PM PT prev night
+    durationInMilliseconds: 34800000, // ~9.67 hours in ms → end = 13:40 UTC = 6:40 AM PT
   };
   const nonSleep = {
     eventType: 'ACTIVITY',
-    startTimestampGMT: '2026-05-05T18:00:00.000Z',
-    durationInSeconds: 7200,
+    eventStartTimeGmt: '2026-05-05T18:00:00.000Z',
+    durationInMilliseconds: 7200000,
   };
 
   it('picks overnight over nap when overnight is longer', () => {
     const result = selectLongestSleepEvent([nap, overnight, nonSleep]);
     expect(result).toBe(overnight);
-    expect(result.durationInSeconds).toBe(34800);
+    // BB-2: real field is durationInMilliseconds (~9.67h in ms)
+    expect(result.durationInMilliseconds).toBe(34800000);
   });
 
   it('picks overnight even when nap appears first in array', () => {
@@ -735,11 +780,14 @@ describe('get_body_battery_at_wake — sleep event selection algorithm', () => {
     expect(result).toBe(overnight);
   });
 
-  it('uses end timestamp from the selected overnight event (the real wake timestamp basis)', () => {
+  it('computes end from parseGmt(eventStartTimeGmt) + durationInMilliseconds for the selected event', () => {
     const result = selectLongestSleepEvent([nap, overnight]);
-    expect(result?.endTimestampGMT).toBe('2026-05-05T13:40:00.000Z');
-    // Confirm this is different from the nap end
-    expect(result?.endTimestampGMT).not.toBe(nap.endTimestampGMT);
+    // overnight: eventStartTimeGmt 04:00 UTC + 34800000ms (9.67h) = 13:40 UTC
+    const computedEnd = parseGmt(result.eventStartTimeGmt) + result.durationInMilliseconds;
+    expect(new Date(computedEnd).toISOString()).toBe('2026-05-05T13:40:00.000Z');
+    // Confirm this is different from the nap's computed end (16:00 UTC)
+    const napEnd = parseGmt(nap.eventStartTimeGmt) + nap.durationInMilliseconds;
+    expect(computedEnd).not.toBe(napEnd);
   });
 
   it('single event is returned directly without error', () => {
@@ -757,22 +805,23 @@ describe('get_body_battery_at_wake — sleep event selection algorithm', () => {
     expect(result).toBeUndefined();
   });
 
-  it('tie-break by latest end timestamp: later-ending event wins', () => {
+  it('tie-break by latest computed end timestamp: later-ending event wins', () => {
+    // Use 'Z' suffix so these parse correctly as UTC in both test and production code
     const earlyLong = {
       eventType: 'sleep',
-      startTimestampGMT: '2026-05-05T01:00:00.000Z',
-      endTimestampGMT: '2026-05-05T09:00:00.000Z',
-      durationInSeconds: 28800, // 8h, ends earlier
+      eventStartTimeGmt: '2026-05-05T01:00:00.000Z', // ends 09:00 UTC
+      durationInMilliseconds: 28800000, // 8h in ms
     };
     const lateLong = {
       eventType: 'sleep',
-      startTimestampGMT: '2026-05-05T03:00:00.000Z',
-      endTimestampGMT: '2026-05-05T11:00:00.000Z',
-      durationInSeconds: 28800, // also 8h, ends later
+      eventStartTimeGmt: '2026-05-05T03:00:00.000Z', // ends 11:00 UTC
+      durationInMilliseconds: 28800000, // also 8h in ms, but later start → later end
     };
     const result = selectLongestSleepEvent([earlyLong, lateLong]);
     expect(result).toBe(lateLong);
-    expect(result?.endTimestampGMT).toBe('2026-05-05T11:00:00.000Z');
+    // Confirm by computing the end: parseGmt(03:00 UTC) + 8h = 11:00 UTC
+    const computedEnd = parseGmt(result.eventStartTimeGmt) + result.durationInMilliseconds;
+    expect(new Date(computedEnd).toISOString()).toBe('2026-05-05T11:00:00.000Z');
   });
 
   it('filters non-sleep events regardless of duration', () => {
@@ -821,5 +870,176 @@ describe('COLOSSUS post-game compact token budget', () => {
     expect(totalChars).toBeLessThan(16000);
     // Should be well under 4000 actual chars
     expect(totalChars).toBeLessThan(4000);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Real-fixture tests — captured 2026-05-06 from Carlos's account
+// These exist because both bugs shipped with hand-rolled fixtures; real fixtures
+// catch field-name drift between Python/Node clients and actual upstream responses.
+// ---------------------------------------------------------------------------
+
+import bbEventFixture from './fixtures/garmin/get_body_battery_events.2026-05-06.carlos.json';
+import bbValueFixture from './fixtures/garmin/get_body_battery.2026-05-06.carlos.json';
+import trTodayFixture from './fixtures/garmin/get_training_readiness.2026-05-06.carlos.json';
+import trMultiEntryFixture from './fixtures/garmin/get_training_readiness_range.2026-05-05.carlos.json';
+
+// ---------------------------------------------------------------------------
+// BB wake-event lookup — real fixture validates BB-1/2/3/4 fixes
+// ---------------------------------------------------------------------------
+
+describe('get_body_battery_at_wake — real fixture: BB field-name fixes (BB-1/2/3/4)', () => {
+  it('BB-1: event wrapped in e.event — selectLongestSleepEvent finds SLEEP after unwrap', () => {
+    // The real upstream shape: [{ event: { eventType, ... }, ... }]
+    // BB-1 fix: unwrap e.event ?? e before filtering on eventType
+    const result = selectLongestSleepEvent(bbEventFixture as any[]);
+    expect(result).not.toBeUndefined();
+    expect(result?.eventType).toBe('SLEEP');
+  });
+
+  it('BB-2: durationInMilliseconds present; no durationInSeconds in real fixture', () => {
+    const result = selectLongestSleepEvent(bbEventFixture as any[]);
+    expect(result?.durationInMilliseconds).toBe(27060000);
+    expect(result?.durationInSeconds).toBeUndefined();
+  });
+
+  it('BB-3: eventStartTimeGmt present; no startTimestampGMT or endTimestampGMT in real fixture', () => {
+    const result = selectLongestSleepEvent(bbEventFixture as any[]);
+    expect(result?.eventStartTimeGmt).toBe('2026-05-06T06:19:07.0');
+    expect(result?.startTimestampGMT).toBeUndefined();
+    expect(result?.endTimestampGMT).toBeUndefined();
+  });
+
+  it('BB-3: sleep end computed as parseGmt(eventStartTimeGmt) + durationInMilliseconds = 13:50:07 UTC', () => {
+    // eventStartTimeGmt "2026-05-06T06:19:07.0" is UTC (6:19 AM UTC = 11:19 PM PT bedtime).
+    // parseGmt forces UTC parse; without it JS reads as local PT → 13:19 UTC (wrong).
+    // 06:19:07 UTC + 27060000ms (7h31m) = 13:50:07 UTC = 6:50 AM PT (wake time).
+    const result = selectLongestSleepEvent(bbEventFixture as any[]);
+    const sleepEndMs = parseGmt(result.eventStartTimeGmt) + result.durationInMilliseconds;
+    expect(new Date(sleepEndMs).toISOString()).toBe('2026-05-06T13:50:07.000Z');
+  });
+
+  it('wakeValue = 75: closest BB sample from get_body_battery to sleep end 13:50:07 UTC', () => {
+    // Real upstream bodyBatteryValuesArray: [[ts, level], ...]
+    // Sleep end: parseGmt("2026-05-06T06:19:07.0") + 27060000ms = 13:50:07 UTC
+    // Candidates: 1778074920000=13:48:40 UTC (87s diff) vs 1778075460000=13:51:00 UTC (53s diff)
+    // Winner: 1778075460000 (13:51:00 UTC), level 75
+    const bbDay = (bbValueFixture as any[])[0];
+    const valuesArray: Array<[number, number]> = bbDay.bodyBatteryValuesArray;
+    const sleepEndMs = new Date('2026-05-06T13:50:07.000Z').getTime();
+    let closest = valuesArray[0];
+    let closestDiff = Math.abs(valuesArray[0][0] - sleepEndMs);
+    for (const entry of valuesArray) {
+      const diff = Math.abs(entry[0] - sleepEndMs);
+      if (diff < closestDiff) { closestDiff = diff; closest = entry; }
+    }
+    expect(closest[1]).toBe(75);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// compactBodyBattery — currentValue addition (Bug 3)
+// ---------------------------------------------------------------------------
+
+describe('compactBodyBattery — currentValue and currentValueTimestamp (Bug 3 / real fixture)', () => {
+  it('currentValue equals the last entry in bodyBatteryValuesArray', () => {
+    const compact = compactors.get_body_battery(bbValueFixture as any);
+    // Last entry in fixture: [1778075460000, 75]
+    expect(compact.currentValue).toBe(75);
+  });
+
+  it('currentValueTimestamp is the ISO timestamp of the last entry', () => {
+    const compact = compactors.get_body_battery(bbValueFixture as any);
+    // Last entry in fixture: [1778075460000, 75] → 2026-05-06T13:51:00.000Z
+    expect(compact.currentValueTimestamp).toBe('2026-05-06T13:51:00.000Z');
+  });
+
+  it('endOfDayValue is an alias for currentValue (both are the last array element)', () => {
+    const compact = compactors.get_body_battery(bbValueFixture as any);
+    expect(compact.endOfDayValue).toBe(compact.currentValue);
+  });
+
+  it('midnightValue is the first array element (00:00 boundary), distinct from currentValue', () => {
+    const compact = compactors.get_body_battery(bbValueFixture as any);
+    // First entry: [1778050800000, 27] — this is the 00:00 calendar boundary reading
+    expect(compact.midnightValue).toBe(27);
+    // currentValue must differ from midnightValue (BB is rising through the day)
+    expect(compact.currentValue).not.toBe(compact.midnightValue);
+  });
+
+  it('currentValue and currentValueTimestamp are both present as fields', () => {
+    const compact = compactors.get_body_battery(bbValueFixture as any);
+    expect('currentValue' in compact).toBe(true);
+    expect('currentValueTimestamp' in compact).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// compactTrainingReadiness — TR-1/2/3 real fixture tests
+// ---------------------------------------------------------------------------
+
+describe('compactTrainingReadiness — real fixture: single-entry bare array (TR-1)', () => {
+  it('TR-1: handles bare array shape (no trainingReadinessDTOList wrapper)', () => {
+    // Real upstream single-day call returns a bare array, not a wrapped object
+    const compact = compactors.get_training_readiness(trTodayFixture as any);
+    expect(compact).not.toBeNull();
+    expect(compact.score).toBe(74);
+  });
+
+  it('TR-2: reads real field names with *FactorPercent suffix', () => {
+    const compact = compactors.get_training_readiness(trTodayFixture as any);
+    // Real upstream: sleepHistoryFactorPercent=57, NOT sleepHistoryFactor
+    expect(compact.sleepHistoryFactorPercent).toBe(57);
+    expect(compact.recoveryTimeFactorPercent).toBe(99);
+    expect(compact.hrvFactorPercent).toBe(67);
+    // acwrFactorPercent (acute:chronic workload ratio) — NOT acuteLoadFactor
+    expect(compact.acwrFactorPercent).toBe(100);
+    expect(compact.stressHistoryFactorPercent).toBe(98);
+  });
+
+  it('core fields correct for 2026-05-06 real data: score=74, level=MODERATE, feedback=MOD_HRV_UNBALANCED', () => {
+    const compact = compactors.get_training_readiness(trTodayFixture as any);
+    expect(compact.score).toBe(74);
+    expect(compact.level).toBe('MODERATE');
+    expect(compact.feedbackLong).toBe('MOD_HRV_UNBALANCED');
+    expect(compact.hrvWeeklyAverage).toBe(27);
+  });
+
+  it('TR-3 metadata fields exposed: inputContext and validSleep', () => {
+    const compact = compactors.get_training_readiness(trTodayFixture as any);
+    expect(compact.inputContext).toBe('AFTER_WAKEUP_RESET');
+    expect(compact.validSleep).toBe(true);
+  });
+});
+
+describe('compactTrainingReadiness — real fixture: multi-entry range (TR-3 selection rule)', () => {
+  it('TR-1: handles range {date, data: [...]} wrapper shape', () => {
+    // get_training_readiness_range returns [{date, data: [...dtos]}]
+    // compactTrainingReadinessRange passes each entry.data to compactTrainingReadiness
+    const rangeEntry = (trMultiEntryFixture as any[])[0];
+    const compact = compactors.get_training_readiness(rangeEntry as any);
+    expect(compact).not.toBeNull();
+  });
+
+  it('TR-3: picks AFTER_WAKEUP_RESET + validSleep=true entry from 4-entry 2026-05-05 day', () => {
+    // 4 entries on 2026-05-05:
+    //   [0] AFTER_POST_EXERCISE_RESET, validSleep=true, score=65 ← should NOT win
+    //   [1] AFTER_WAKEUP_RESET, validSleep=true, score=66 ← should WIN
+    //   [2] AFTER_WAKEUP_RESET, validSleep=false, score=75 ← has right context but no valid sleep
+    //   [3] UPDATE_REALTIME_VARIABLES, validSleep=false, score=80 ← should NOT win
+    const rangeEntry = (trMultiEntryFixture as any[])[0];
+    const compact = compactors.get_training_readiness(rangeEntry as any);
+    expect(compact.score).toBe(66);
+    expect(compact.inputContext).toBe('AFTER_WAKEUP_RESET');
+    expect(compact.validSleep).toBe(true);
+  });
+
+  it('TR-3: does NOT pick the highest score (score is not the selection criterion)', () => {
+    const rangeEntry = (trMultiEntryFixture as any[])[0];
+    const compact = compactors.get_training_readiness(rangeEntry as any);
+    // score=80 (UPDATE_REALTIME_VARIABLES) would win if score were the criterion
+    expect(compact.score).not.toBe(80);
+    // score=75 (AFTER_WAKEUP_RESET + validSleep=false) would win if validSleep wasn't checked
+    expect(compact.score).not.toBe(75);
   });
 });

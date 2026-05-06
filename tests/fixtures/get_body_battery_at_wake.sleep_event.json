@@ -1,8 +1,8 @@
 {
-  "_comment": "Fixture: 2026-05-05 Carlos. Confirmed by BAYMAX investigation. Sleep end ~13:40 UTC = 6:40 AM PT. midnightValue=32, wakeValue=71.",
-  "date": "2026-05-05",
+  "_comment": "Fixture: 2026-05-06 Carlos. Sleep event: eventStartTimeGmt=06:19:07 UTC (parseGmt forces UTC) + durationInMilliseconds=27060000ms → sleepEnd=13:50:07 UTC = 6:50 AM PT. Closest BB sample: 1778075460000 (13:51:00 UTC, 53s diff) vs 1778074920000 (13:48:40 UTC, 87s diff). Level 75 at both samples. wakeValue=75, wakeTimestamp=13:51:00 UTC. midnightValue for this day is 27 — confirming sleep_event join is NOT the midnight reading.",
+  "date": "2026-05-06",
   "user": "carlos",
-  "wakeTimestamp": "2026-05-05T13:42:00.000Z",
-  "wakeValue": 71,
+  "wakeTimestamp": "2026-05-06T13:51:00.000Z",
+  "wakeValue": 75,
   "confidence": "sleep_event"
 }

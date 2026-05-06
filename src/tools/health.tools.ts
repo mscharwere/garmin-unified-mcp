@@ -109,7 +109,7 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
   );
 
   // ---------------------------------------------------------------------------
-  // get_body_battery_at_wake — KAREN fix/wake-value-correctness (2026-05-05)
+  // get_body_battery_at_wake — KAREN fix/wake-event-lookup (2026-05-06)
   //
   // Uses raw server.registerTool (not registerCompactedTool) because it requires
   // two upstream calls (getBodyBattery + getBodyBatteryEvents) and returns a
@@ -119,9 +119,20 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
   // the intraday BB time-series with the sleep events endpoint to find the sleep
   // event end timestamp, then finding the closest BB sample to that moment.
   //
-  // Edge case: if no sleep event is found (getBodyBatteryEvents returns null or
-  // an empty array), falls back to the lowestValue with confidence='estimated_from_lowest'
-  // and includes a caveat. This fallback has been observed in the wild (2026-05-05).
+  // Real upstream shapes (captured 2026-05-06):
+  //   getBodyBatteryEvents → [{ event: { eventType, eventStartTimeGmt,
+  //                                       durationInMilliseconds, ... }, ... }]
+  //     • eventType lives at e.event.eventType (wrapped), NOT e.eventType
+  //     • duration is durationInMilliseconds (NOT durationInSeconds)
+  //     • start is eventStartTimeGmt (NOT startTimestampGMT)
+  //     • no endTimestampGMT field — must compute: start + durationInMilliseconds
+  //   getBodyBattery → [{ bodyBatteryValuesArray: [[ts_ms, level], ...] }]
+  //     • 2-tuple, index 1 is the numeric BB level
+  //
+  // Edge case: if no sleep event is found, returns wakeValue: null with
+  // confidence='unavailable'. The previous "estimated_from_lowest" heuristic
+  // was broken-by-design — recovery nights have their nadir pre-bed or mid-night,
+  // not at wake. Better to return null than a confidently wrong number.
   // ---------------------------------------------------------------------------
   const userEnum = z.enum(clientPool.userEnum);
 
@@ -134,8 +145,9 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
         'intraday BB time-series with the sleep events endpoint. Returns wakeValue, wakeTimestamp, ' +
         'and a confidence indicator. Use this instead of get_body_battery\'s deprecated wakeValue ' +
         'field, which is the 00:00 midnight reading — not the actual wake BB. ' +
-        'Edge case: if no sleep event is available, falls back to lowestValue with ' +
-        'confidence=\'estimated_from_lowest\' and a caveat field explaining the limitation.',
+        'Edge case: if no sleep event is found in the events response, returns ' +
+        'wakeValue: null with confidence=\'unavailable\' and a caveat. ' +
+        'No estimation heuristic — null is more honest than a wrong number.',
       inputSchema: {
         user: userEnum,
         date: dateString.optional().describe('Date in YYYY-MM-DD format. Defaults to today if not provided'),
@@ -153,6 +165,17 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
           const resolvedDate = args.date ??
             new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Los_Angeles' }).format(new Date());
 
+          // parseGmt: force Garmin "*Gmt" timestamp strings to UTC.
+          // Garmin emits ISO-8601 without a timezone suffix (e.g. "2026-05-06T06:19:07.0").
+          // JS Date parses suffix-less strings as LOCAL time on most runtimes — wrong for GMT fields.
+          // Appending 'Z' forces UTC interpretation: "2026-05-06T06:19:07.0Z" → 06:19 UTC.
+          function parseGmt(s: string): number {
+            // Already has timezone designator — parse as-is
+            if (s.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(s)) return new Date(s).getTime();
+            // Strip trailing .0 / .000 fractional seconds then append Z
+            return new Date(s.replace(/\.\d+$/, '') + 'Z').getTime();
+          }
+
           // Fire both requests in parallel — independent endpoints
           const [bbRaw, eventsRaw] = await Promise.all([
             client.getBodyBattery(resolvedDate, resolvedDate),
@@ -160,26 +183,26 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
           ]);
 
           // ---- Parse BB time-series ----
-          // getBodyBattery returns an array of day objects; take the last one
+          // getBodyBattery returns an array of day objects; take the last one.
+          // bodyBatteryValuesArray entries are [timestamp_ms, bb_level] 2-tuples.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const bbItems = Array.isArray(bbRaw) ? bbRaw : [bbRaw as any];
           const day = bbItems[bbItems.length - 1];
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const valuesArray: Array<[number, number, number]> = Array.isArray(day?.bodyBatteryValuesArray)
+          const valuesArray: Array<[number, number]> = Array.isArray(day?.bodyBatteryValuesArray)
             ? day.bodyBatteryValuesArray
             : [];
 
-          // lowestValue as fallback — the nadir is closest to wake for most users
-          const bbValues = valuesArray.map(v => v?.[1]).filter(v => v != null);
-          const lowestValue = bbValues.length > 0 ? Math.min(...bbValues) : null;
-
           // ---- Parse sleep events ----
-          // getBodyBatteryEvents returns an array or object with .events
+          // BB-1 fix: getBodyBatteryEvents wraps the event object: [{ event: {...}, ... }]
+          // Normalize both wrapped (e.event) and unwrapped (e) shapes for forward-compat.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const events: any[] = Array.isArray(eventsRaw)
+          const rawEvents: any[] = Array.isArray(eventsRaw)
             ? eventsRaw
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             : (eventsRaw as any)?.events ?? [];
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const events = rawEvents.map((e: any) => e?.event ?? e);
 
           // Find the sleep event: collect all events whose eventType contains 'sleep'
           // (case-insensitive), then pick the one with the longest duration so that a
@@ -198,65 +221,66 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
           if (sleepEvents.length > 0) {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
             sleepEvent = sleepEvents.reduce((best: any, candidate: any) => {
-              const bestDur = best?.durationInSeconds ?? 0;
-              const candDur = candidate?.durationInSeconds ?? 0;
-              if (candDur > bestDur) return candidate;
-              if (candDur === bestDur) {
-                // Tie-break: latest end timestamp
-                const bestEnd = best?.endTimestampGMT
-                  ? new Date(best.endTimestampGMT).getTime()
-                  : (best?.startTimestampGMT
-                    ? new Date(best.startTimestampGMT).getTime() + (bestDur * 1000)
-                    : 0);
-                const candEnd = candidate?.endTimestampGMT
-                  ? new Date(candidate.endTimestampGMT).getTime()
-                  : (candidate?.startTimestampGMT
-                    ? new Date(candidate.startTimestampGMT).getTime() + (candDur * 1000)
-                    : 0);
+              // BB-2 fix: upstream uses durationInMilliseconds (not durationInSeconds)
+              const bestDurMs = best?.durationInMilliseconds ?? 0;
+              const candDurMs = candidate?.durationInMilliseconds ?? 0;
+              if (candDurMs > bestDurMs) return candidate;
+              if (candDurMs === bestDurMs) {
+                // Tie-break: latest computed end timestamp
+                // BB-3 fix: start field is eventStartTimeGmt (not startTimestampGMT)
+                const bestEnd = best?.eventStartTimeGmt
+                  ? parseGmt(best.eventStartTimeGmt) + bestDurMs
+                  : 0;
+                const candEnd = candidate?.eventStartTimeGmt
+                  ? parseGmt(candidate.eventStartTimeGmt) + candDurMs
+                  : 0;
                 return candEnd > bestEnd ? candidate : best;
               }
               return best;
             });
           }
 
-          // ---- No sleep event → fallback path ----
+          // ---- No sleep event → unavailable (BB-4: kill broken heuristic) ----
+          // The previous "estimated_from_lowest" fallback was broken-by-design:
+          // on recovery nights the BB nadir is pre-bed or mid-night, not at wake.
+          // Returning a confidently wrong number is worse than returning null.
           if (!sleepEvent) {
             return successResponse({
               date: resolvedDate,
               user: args.user,
               wakeTimestamp: null,
-              wakeValue: lowestValue,
-              confidence: 'estimated_from_lowest' as const,
+              wakeValue: null,
+              confidence: 'unavailable' as const,
               caveat:
-                'No sleep event returned by get_body_battery_events for this date. ' +
-                'wakeValue is the intraday lowest BB (heuristic proxy for post-sleep nadir). ' +
-                'Re-run after sync or use get_body_battery_events to investigate.',
+                'No sleep event found in body-battery events response for this date. ' +
+                'Re-run after device sync or use get_body_battery_events to investigate.',
             });
           }
 
           // ---- Sleep event found → join on timestamp ----
-          // Sleep event end timestamp: prefer endTimestampGMT, fall back to computed start+duration
+          // BB-3 fix: compute end from eventStartTimeGmt + durationInMilliseconds.
+          // There is no endTimestampGMT field in the upstream response.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const e = sleepEvent as any;
           let sleepEndMs: number | null = null;
 
-          if (e.endTimestampGMT) {
-            sleepEndMs = new Date(e.endTimestampGMT).getTime();
-          } else if (e.startTimestampGMT && e.durationInSeconds != null) {
-            sleepEndMs = new Date(e.startTimestampGMT).getTime() + (e.durationInSeconds * 1000);
+          // BB-2 + BB-3 fix: use eventStartTimeGmt + durationInMilliseconds.
+          // parseGmt forces UTC interpretation (Garmin omits timezone suffix).
+          if (e.eventStartTimeGmt != null && e.durationInMilliseconds != null) {
+            sleepEndMs = parseGmt(e.eventStartTimeGmt) + e.durationInMilliseconds;
           }
 
           if (sleepEndMs == null || valuesArray.length === 0) {
-            // Can't resolve timestamp → fallback
+            // Can't resolve timestamp → unavailable (not estimated)
             return successResponse({
               date: resolvedDate,
               user: args.user,
               wakeTimestamp: null,
-              wakeValue: lowestValue,
-              confidence: 'estimated_from_lowest' as const,
+              wakeValue: null,
+              confidence: 'unavailable' as const,
               caveat:
-                'Sleep event found but could not resolve end timestamp or BB time-series is empty. ' +
-                'wakeValue is the intraday lowest BB (heuristic proxy).',
+                'Sleep event found but could not resolve end timestamp (missing eventStartTimeGmt ' +
+                'or durationInMilliseconds) or BB time-series is empty.',
             });
           }
 
