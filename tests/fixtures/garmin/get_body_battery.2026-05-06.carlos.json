@@ -1,0 +1,46 @@
+[
+  {
+    "_fixture_meta": {
+      "captured": "2026-05-06",
+      "user": "carlos",
+      "note": "Real upstream response from get_body_battery. bodyBatteryValuesArray is [ts, level] 2-tuple (distinct from get_body_battery_events which uses 4-tuples). bodyBatteryActivityEvent array has event items at top level (not wrapped). sleepEndMs = parseGmt(eventStartTimeGmt=06:19:07 UTC) + durationInMilliseconds(27060000ms) = 13:50:07 UTC. Closest BB sample: 1778075460000 (13:51:00 UTC, 53s diff) wins over 1778074920000 (13:42:00 UTC, 487s diff). Both level 75. currentValue = 75, currentValueTimestamp = 2026-05-06T13:51:00.000Z."
+    },
+    "date": "2026-05-06",
+    "charged": 48,
+    "drained": 2,
+    "startTimestampGMT": "2026-05-06T07:00:00.0",
+    "endTimestampGMT": "2026-05-06T14:38:00.0",
+    "startTimestampLocal": "2026-05-06T00:00:00.0",
+    "endTimestampLocal": "2026-05-06T07:38:00.0",
+    "bodyBatteryValuesArray": [
+      [1778050800000, 27],
+      [1778059260000, 49],
+      [1778059980000, 50],
+      [1778068440000, 65],
+      [1778069160000, 66],
+      [1778074920000, 75],
+      [1778075460000, 75]
+    ],
+    "bodyBatteryValueDescriptorDTOList": [
+      { "bodyBatteryValueDescriptorIndex": 0, "bodyBatteryValueDescriptorKey": "timestamp" },
+      { "bodyBatteryValueDescriptorIndex": 1, "bodyBatteryValueDescriptorKey": "bodyBatteryLevel" }
+    ],
+    "bodyBatteryDynamicFeedbackEvent": {
+      "eventTimestampGmt": "2026-05-06T13:55:54.0",
+      "bodyBatteryLevel": "MODERATE",
+      "feedbackShortType": null,
+      "feedbackLongType": "EARLY_MORNING_HIGH_MODERATE_HIGH_BB_BEFORE_SLEEP"
+    },
+    "bodyBatteryActivityEvent": [
+      {
+        "eventType": "SLEEP",
+        "eventStartTimeGmt": "2026-05-06T06:19:07.0",
+        "timezoneOffset": -25200000,
+        "durationInMilliseconds": 27060000,
+        "bodyBatteryImpact": 50,
+        "feedbackType": "NONE",
+        "shortFeedback": "NONE"
+      }
+    ]
+  }
+]

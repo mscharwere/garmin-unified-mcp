@@ -1,9 +1,9 @@
 {
-  "_comment": "Fixture: fallback case — no sleep event returned. wakeValue = lowestValue heuristic.",
+  "_comment": "Fixture: fallback case — no sleep event found. BB-4 fix: wakeValue is null with confidence=unavailable. The previous estimated_from_lowest heuristic was broken-by-design (recovery nights have nadir pre-bed, not at wake). Null is more honest than a wrong number.",
   "date": "2026-05-05",
   "user": "carlos",
   "wakeTimestamp": null,
-  "wakeValue": 28,
-  "confidence": "estimated_from_lowest",
-  "caveat": "No sleep event returned by get_body_battery_events for this date. wakeValue is the intraday lowest BB (heuristic proxy for post-sleep nadir). Re-run after sync or use get_body_battery_events to investigate."
+  "wakeValue": null,
+  "confidence": "unavailable",
+  "caveat": "No sleep event found in body-battery events response for this date. Re-run after device sync or use get_body_battery_events to investigate."
 }

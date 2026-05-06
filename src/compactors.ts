@@ -337,6 +337,13 @@ const compactStress: Compactor = (full: any) => ({
  *   for one release so existing COLOSSUS/BAYMAX prompts don't break during the shim period.
  *   It will be removed in a follow-up PR. Consumers should call `get_body_battery_at_wake`
  *   instead for the correct sleep-event-joined wake value.
+ *
+ * KAREN fix/bb-wake-event-lookup (2026-05-06):
+ *   Added `currentValue` and `currentValueTimestamp` — the latest non-null BB sample
+ *   in the array. `endOfDayValue` is the last 3-min sample, which is stale-by-design
+ *   once the day is in progress (today: potentially 60+ min stale depending on sync).
+ *   `currentValue` is the same last element but paired with its timestamp so consumers
+ *   can detect staleness. Both fields are kept so existing consumers aren't broken.
  */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const compactBodyBattery: Compactor = (full: any) => {
@@ -344,20 +351,21 @@ const compactBodyBattery: Compactor = (full: any) => {
   if (items.length === 0) return null;
   // Body battery endpoint can return an array; take the last (most recent) day's summary
   const day = items[items.length - 1];
-  const charged = Array.isArray(day?.bodyBatteryValuesArray)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ? day.bodyBatteryValuesArray.filter((v: any) => v?.[2] > 0).reduce((s: number, v: any) => s + v[2], 0)
-    : null;
-  const drained = Array.isArray(day?.bodyBatteryValuesArray)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ? Math.abs(day.bodyBatteryValuesArray.filter((v: any) => v?.[2] < 0).reduce((s: number, v: any) => s + v[2], 0))
-    : null;
-  const values = Array.isArray(day?.bodyBatteryValuesArray)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    ? day.bodyBatteryValuesArray.map((v: any) => v?.[1]).filter((v: any) => v != null)
+  // bodyBatteryValuesArray from get_body_battery: [timestamp_ms, bb_level] 2-tuples.
+  // (The events endpoint uses 4-tuples — different shape, different call.)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const valuesArray: Array<[number, number]> = Array.isArray(day?.bodyBatteryValuesArray)
+    ? day.bodyBatteryValuesArray
     : [];
+  const values = valuesArray.map(v => v?.[1]).filter((v): v is number => v != null);
   // midnightValue: the 00:00 calendar-boundary BB (honest name for values[0])
   const midnightValue = values.length > 0 ? values[0] : null;
+  // currentValue: the most recent BB sample (last array element).
+  // Paired with timestamp so consumers can detect sync staleness.
+  // endOfDayValue is an alias for currentValue kept for backwards-compat.
+  const lastEntry = valuesArray.length > 0 ? valuesArray[valuesArray.length - 1] : null;
+  const currentValue = lastEntry != null ? lastEntry[1] : null;
+  const currentValueTimestamp = lastEntry != null ? new Date(lastEntry[0]).toISOString() : null;
   return {
     date: day?.date ?? null,
     midnightValue,
@@ -367,23 +375,45 @@ const compactBodyBattery: Compactor = (full: any) => {
     wakeValue: midnightValue,
     highestValue: values.length > 0 ? Math.max(...values) : null,
     lowestValue: values.length > 0 ? Math.min(...values) : null,
-    endOfDayValue: values.length > 0 ? values[values.length - 1] : null,
-    chargedTotal: charged,
-    drainedTotal: drained,
+    /** endOfDayValue: alias for currentValue (last array element). Both are kept for parity.
+     *  Note: today's value may be 60+ min stale depending on last device sync. */
+    endOfDayValue: currentValue,
+    /** currentValue: latest non-null BB sample. Check currentValueTimestamp for staleness. */
+    currentValue,
+    /** currentValueTimestamp: ISO timestamp of the currentValue sample. */
+    currentValueTimestamp,
+    chargedTotal: day?.charged ?? null,
+    drainedTotal: day?.drained ?? null,
   };
 };
 
-/** get_body_battery_events — ~70% reduction */
+/**
+ * get_body_battery_events — ~70% reduction
+ *
+ * Real upstream shape (captured 2026-05-06): an array of wrapper objects.
+ * The event data is nested at entry.event, not at the entry top level:
+ *   [{ event: { eventType, eventStartTimeGmt, durationInMilliseconds, bodyBatteryImpact }, ... }]
+ *
+ * Normalize both wrapped (entry.event) and unwrapped (entry) for forward-compat.
+ * Duration is in milliseconds — convert to minutes for display.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const compactBodyBatteryEvents: Compactor = (full: any) => {
-  const events = Array.isArray(full) ? full : full?.events ?? [];
+  const rawEvents = Array.isArray(full) ? full : full?.events ?? [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return events.map((e: any) => ({
-    timestamp: e?.startTimestampGMT ?? e?.timestamp ?? null,
-    eventType: e?.eventType ?? null,
-    bodyBatteryDelta: e?.bodyBatteryDelta ?? null,
-    durationMinutes: e?.durationInSeconds != null ? Math.round(e.durationInSeconds / 60) : null,
-  }));
+  return rawEvents.map((entry: any) => {
+    const e = entry?.event ?? entry; // unwrap nested shape
+    return {
+      timestamp: e?.eventStartTimeGmt ?? e?.startTimestampGMT ?? e?.timestamp ?? null,
+      eventType: e?.eventType ?? null,
+      bodyBatteryImpact: e?.bodyBatteryImpact ?? e?.bodyBatteryDelta ?? null,
+      durationMinutes: e?.durationInMilliseconds != null
+        ? Math.round(e.durationInMilliseconds / 60000)
+        : e?.durationInSeconds != null
+          ? Math.round(e.durationInSeconds / 60)
+          : null,
+    };
+  });
 };
 
 /** get_respiration — ~95% reduction */
@@ -593,22 +623,82 @@ const compactBloodPressure: Compactor = (full: any) => {
 // Performance & Training
 // ---------------------------------------------------------------------------
 
-/** get_training_readiness — ~70% reduction */
+/**
+ * get_training_readiness — ~70% reduction
+ *
+ * TR-1 fix: upstream returns three possible shapes:
+ *   - single-day: a bare array of DTO objects
+ *   - range (via get_training_readiness_range): { date, data: [...dtos] }
+ *   - legacy (never observed in the wild, kept for safety): { trainingReadinessDTOList: [...] }
+ *
+ * TR-2 fix: real field names use *FactorPercent suffix:
+ *   sleepHistoryFactorPercent, recoveryTimeFactorPercent, hrvFactorPercent,
+ *   stressHistoryFactorPercent, acwrFactorPercent.
+ *   Note: "acwr" = acute:chronic workload ratio — do NOT rename to "acuteLoad".
+ *   acuteLoad (raw) is a separate field surfaced separately.
+ *
+ * TR-3 selection rule: when full is an array with multiple DTOs (e.g. the 4-entry
+ *   2026-05-05 case with wakeup reset + post-exercise reset + nap + real-time update),
+ *   prefer the entry with inputContext == "AFTER_WAKEUP_RESET" AND validSleep == true.
+ *   Fallback: most-recent by timestamp. This ensures BAYMAX sees the canonical
+ *   morning training readiness, not a mid-day recalculation.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const compactTrainingReadiness: Compactor = (full: any) => {
-  const dto = full?.trainingReadinessDTOList?.[0] ?? full?.trainingReadinessDTO ?? full;
+  // TR-1: detect shape and normalize to an array of DTOs
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let dtos: any[];
+  if (Array.isArray(full)) {
+    // single-day call: bare array returned by get_training_readiness
+    dtos = full;
+  } else if (Array.isArray(full?.data)) {
+    // range wrapper: { date, data: [...dtos] }
+    dtos = full.data;
+  } else if (Array.isArray(full?.trainingReadinessDTOList)) {
+    // legacy shape (never observed live, kept for safety)
+    dtos = full.trainingReadinessDTOList;
+  } else if (full?.trainingReadinessDTO != null) {
+    dtos = [full.trainingReadinessDTO];
+  } else {
+    // last resort: treat full as a single DTO
+    dtos = [full];
+  }
+
+  if (dtos.length === 0) return null;
+
+  // TR-3 selection rule: prefer AFTER_WAKEUP_RESET with validSleep=true
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let dto: any = dtos.find(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (d: any) => d?.inputContext === 'AFTER_WAKEUP_RESET' && d?.validSleep === true,
+  );
+  if (!dto) {
+    // Fallback: most-recent by timestamp
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    dto = dtos.reduce((latest: any, candidate: any) => {
+      const latestTs = latest?.timestamp ? new Date(latest.timestamp).getTime() : 0;
+      const candTs = candidate?.timestamp ? new Date(candidate.timestamp).getTime() : 0;
+      return candTs > latestTs ? candidate : latest;
+    });
+  }
+
   return {
     date: dto?.calendarDate ?? null,
     score: dto?.score ?? null,
     level: dto?.level ?? null,
     feedbackLong: dto?.feedbackLong ?? null,
     sleepScore: dto?.sleepScore ?? null,
-    sleepHistoryFactor: dto?.sleepHistoryFactor ?? null,
-    recoveryTimeFactor: dto?.recoveryTimeFactor ?? null,
-    hrvFactor: dto?.hrvFactor ?? null,
+    // TR-2: real field names use *FactorPercent suffix (not *Factor)
+    sleepHistoryFactorPercent: dto?.sleepHistoryFactorPercent ?? null,
+    recoveryTimeFactorPercent: dto?.recoveryTimeFactorPercent ?? null,
+    hrvFactorPercent: dto?.hrvFactorPercent ?? null,
     hrvWeeklyAverage: dto?.hrvWeeklyAverage ?? null,
-    acuteLoadFactor: dto?.acuteLoadFactor ?? null,
-    stressHistoryFactor: dto?.stressHistoryFactor ?? null,
+    // acwrFactorPercent = acute:chronic workload ratio — NOT the same as acuteLoadFactor
+    acwrFactorPercent: dto?.acwrFactorPercent ?? null,
+    stressHistoryFactorPercent: dto?.stressHistoryFactorPercent ?? null,
+    // Selection metadata — lets consumers know which context was used
+    inputContext: dto?.inputContext ?? null,
+    validSleep: dto?.validSleep ?? null,
   };
 };
 
