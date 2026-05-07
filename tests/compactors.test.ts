@@ -1005,10 +1005,10 @@ function pickWakeFromSleepData(sleep: any): { wakeTs: number | null; wakeValue: 
     const ts = toEpochMs(entry?.startGMT);
     const val = entry?.value;
     if (ts == null || typeof val !== 'number') continue;
-    if (ts <= sleepEndTs) {
-      chosenTs = ts;
-      chosenValue = val;
-    }
+    // sleepBodyBattery is sorted ascending by startGMT; stop once we pass sleepEnd.
+    if (ts > sleepEndTs) break;
+    chosenTs = ts;
+    chosenValue = val;
   }
   return { wakeTs: chosenTs, wakeValue: chosenValue };
 }
@@ -1063,6 +1063,20 @@ describe('get_body_battery_at_wake — sleep_data_fallback algorithm (Carlitos 2
     const result = pickWakeFromSleepData(sleep);
     expect(result.wakeValue).toBe(92);
     expect(new Date(result.wakeTs!).toISOString()).toBe('2026-05-07T13:51:00.000Z');
+  });
+
+  it('returns null wake when all sleepBodyBattery entries are strictly after sleepEndTimestampGMT', () => {
+    // Every entry's startGMT > sleepEndTs → chosenTs stays null → falls through to unavailable.
+    const sleepEnd = 1778161920000; // 13:52 UTC
+    const result = pickWakeFromSleepData({
+      dailySleepDTO: { sleepEndTimestampGMT: sleepEnd },
+      sleepBodyBattery: [
+        { startGMT: sleepEnd + 60000, value: 93 },  // 13:53 UTC — after
+        { startGMT: sleepEnd + 120000, value: 94 }, // 13:54 UTC — after
+      ],
+    });
+    expect(result.wakeTs).toBeNull();
+    expect(result.wakeValue).toBeNull();
   });
 });
 

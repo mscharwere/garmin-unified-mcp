@@ -293,11 +293,10 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
                   const ts = toEpochMs(entry?.startGMT);
                   const val = entry?.value;
                   if (ts == null || typeof val !== 'number') continue;
-                  if (ts <= sleepEndTs) {
-                    // Keep advancing forward — last one ≤ sleepEnd wins
-                    chosenTs = ts;
-                    chosenValue = val;
-                  }
+                  // sleepBodyBattery is sorted ascending by startGMT; stop once we pass sleepEnd.
+                  if (ts > sleepEndTs) break;
+                  chosenTs = ts;
+                  chosenValue = val;
                 }
 
                 if (chosenTs != null && chosenValue != null) {
