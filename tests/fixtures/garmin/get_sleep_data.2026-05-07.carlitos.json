@@ -1,0 +1,17 @@
+{
+  "_comment": "Fixture: 2026-05-07 Carlitos (Junior account). Captured live via mcp__garmin__get_sleep_data during COLOSSUS readout 2026-05-07 ~07:30 PT — only fields consumed by get_body_battery_at_wake's sleep_data_fallback path are retained (dailySleepDTO.sleepEndTimestampGMT + sleepBodyBattery[]). Sleep window 06:55→13:52 UTC = 11:55 PM PST May 6 → 6:52 AM PST May 7. Last sleepBodyBattery entry's startGMT (1778161860000 = 13:51 UTC, 60s before wake) carries value=92 — matches Garmin Connect mobile app. Note: startGMT is a NUMBER (epoch ms) on Junior accounts — adult accounts emit a string ('YYYY-MM-DD HH:mm:ss') in the same field.",
+  "dailySleepDTO": {
+    "calendarDate": "2026-05-07",
+    "sleepStartTimestampGMT": 1778136900000,
+    "sleepEndTimestampGMT": 1778161920000,
+    "sleepTimeSeconds": 25020
+  },
+  "sleepBodyBattery": [
+    { "startGMT": 1778136900000, "value": 71 },
+    { "startGMT": 1778138400000, "value": 73 },
+    { "startGMT": 1778145600000, "value": 80 },
+    { "startGMT": 1778152800000, "value": 86 },
+    { "startGMT": 1778160000000, "value": 91 },
+    { "startGMT": 1778161860000, "value": 92 }
+  ]
+}

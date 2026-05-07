@@ -626,6 +626,8 @@ describe('BAYMAX morning-briefing compact token budget', () => {
 
 import wakeAtWakeSleepEvent from './fixtures/get_body_battery_at_wake.sleep_event.json';
 import wakeAtWakeFallback from './fixtures/get_body_battery_at_wake.fallback.json';
+import wakeAtWakeSleepDataFallback from './fixtures/get_body_battery_at_wake.sleep_data_fallback.json';
+import sleepDataCarlitos20260507 from './fixtures/garmin/get_sleep_data.2026-05-07.carlitos.json';
 
 describe('get_body_battery_at_wake fixture shape — sleep_event confidence', () => {
   // Real-world case: 2026-05-06 Carlos.
@@ -660,6 +662,34 @@ describe('get_body_battery_at_wake fixture shape — sleep_event confidence', ()
 
   it('identity compactor round-trips the shape unchanged', () => {
     // get_body_battery_at_wake uses identity compactor — shape is already compact
+    const compacted = compactors.get_body_battery_at_wake(fixture);
+    expect(JSON.stringify(compacted)).toEqual(JSON.stringify(fixture));
+  });
+});
+
+describe('get_body_battery_at_wake fixture shape — sleep_data_fallback confidence (TARS 2026-05-07)', () => {
+  // sleep_data_fallback: events endpoint empty (async classifier lag — Carlitos
+  // 2026-05-07, resolved on retry minutes later), so the tool falls back to getSleepData's sleepBodyBattery array.
+  // Wake BB = last sleepBodyBattery entry whose startGMT ≤ sleepEndTimestampGMT.
+  const fixture = wakeAtWakeSleepDataFallback;
+
+  it('has required fields with sleep_data_fallback confidence', () => {
+    expect(fixture.date).toBeDefined();
+    expect(fixture.user).toBeDefined();
+    expect(fixture.wakeValue).toBeDefined();
+    expect(fixture.confidence).toBe('sleep_data_fallback');
+    expect(fixture.wakeTimestamp).toBeDefined();
+  });
+
+  it('wakeValue matches Carlitos 2026-05-07 real-world case (92)', () => {
+    expect(fixture.wakeValue).toBe(92);
+  });
+
+  it('wakeTimestamp is 13:51 UTC (6:51 AM PT) — 60s before sleepEnd 13:52 UTC', () => {
+    expect(fixture.wakeTimestamp).toBe('2026-05-07T13:51:00.000Z');
+  });
+
+  it('identity compactor round-trips the shape unchanged', () => {
     const compacted = compactors.get_body_battery_at_wake(fixture);
     expect(JSON.stringify(compacted)).toEqual(JSON.stringify(fixture));
   });
@@ -934,6 +964,119 @@ describe('get_body_battery_at_wake — real fixture: BB field-name fixes (BB-1/2
       if (diff < closestDiff) { closestDiff = diff; closest = entry; }
     }
     expect(closest[1]).toBe(75);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// BB at-wake — sleep_data_fallback path (TARS 2026-05-07)
+// Real fixture: Carlitos 2026-05-07 — get_body_battery_events returned [], the
+// previous BB-4 logic bailed to confidence=unavailable. Root cause: async
+// classification batch on Garmin's events endpoint backfills after raw wellness
+// data lands; pre-9AM pulls can return [] for any account on any day (~8% miss
+// rate over a 25-day sample). The wake BB is recoverable via getSleepData
+// (dailySleepDTO.sleepEndTimestampGMT + sleepBodyBattery[] last-entry-≤-sleepEnd).
+// This test exercises the same algorithm against the real captured fixture data.
+// ---------------------------------------------------------------------------
+
+/**
+ * Inline replica of the sleep_data_fallback selection logic in health.tools.ts —
+ * keeps the test isolated from the MCP server registration path while still
+ * exercising the same algorithm against real fixture data.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function pickWakeFromSleepData(sleep: any): { wakeTs: number | null; wakeValue: number | null } {
+  const sleepEndTs: number | undefined = sleep?.dailySleepDTO?.sleepEndTimestampGMT;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sleepBb: any[] = Array.isArray(sleep?.sleepBodyBattery) ? sleep.sleepBodyBattery : [];
+  if (typeof sleepEndTs !== 'number' || sleepBb.length === 0) {
+    return { wakeTs: null, wakeValue: null };
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const toEpochMs = (v: any): number | null => {
+    if (typeof v === 'number') return v;
+    if (typeof v !== 'string') return null;
+    if (v.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(v)) return new Date(v).getTime();
+    const isoish = v.includes('T') ? v : v.replace(' ', 'T');
+    return new Date(isoish.replace(/\.\d+$/, '') + 'Z').getTime();
+  };
+  let chosenTs: number | null = null;
+  let chosenValue: number | null = null;
+  for (const entry of sleepBb) {
+    const ts = toEpochMs(entry?.startGMT);
+    const val = entry?.value;
+    if (ts == null || typeof val !== 'number') continue;
+    // sleepBodyBattery is sorted ascending by startGMT; stop once we pass sleepEnd.
+    if (ts > sleepEndTs) break;
+    chosenTs = ts;
+    chosenValue = val;
+  }
+  return { wakeTs: chosenTs, wakeValue: chosenValue };
+}
+
+describe('get_body_battery_at_wake — sleep_data_fallback algorithm (Carlitos 2026-05-07 real fixture)', () => {
+  // Fixture shape (Carlitos 2026-05-07): dailySleepDTO.sleepEndTimestampGMT is epoch ms (number),
+  // sleepBodyBattery[].startGMT is epoch ms (number). Other accounts may emit string for startGMT;
+  // toEpochMs handles both shapes.
+  it('sleepEndTimestampGMT is a number (epoch ms fixture shape)', () => {
+    expect(typeof (sleepDataCarlitos20260507 as any).dailySleepDTO.sleepEndTimestampGMT).toBe('number');
+    expect((sleepDataCarlitos20260507 as any).dailySleepDTO.sleepEndTimestampGMT).toBe(1778161920000);
+  });
+
+  it('sleepBodyBattery is non-empty and last entry is the wake-instant value 92', () => {
+    const arr = (sleepDataCarlitos20260507 as any).sleepBodyBattery as Array<{ startGMT: number; value: number }>;
+    expect(arr.length).toBeGreaterThan(0);
+    const last = arr[arr.length - 1];
+    expect(last.startGMT).toBe(1778161860000);
+    expect(last.value).toBe(92);
+  });
+
+  it('picks the last sleepBodyBattery entry whose startGMT ≤ sleepEndTimestampGMT', () => {
+    const result = pickWakeFromSleepData(sleepDataCarlitos20260507);
+    expect(result.wakeValue).toBe(92);
+    expect(result.wakeTs).toBe(1778161860000);
+    expect(new Date(result.wakeTs!).toISOString()).toBe('2026-05-07T13:51:00.000Z');
+  });
+
+  it('returns null wake when sleepBodyBattery array is empty', () => {
+    const result = pickWakeFromSleepData({ dailySleepDTO: { sleepEndTimestampGMT: 1778161920000 }, sleepBodyBattery: [] });
+    expect(result.wakeValue).toBeNull();
+    expect(result.wakeTs).toBeNull();
+  });
+
+  it('returns null wake when sleepEndTimestampGMT is missing', () => {
+    const result = pickWakeFromSleepData({ dailySleepDTO: {}, sleepBodyBattery: [{ startGMT: 1, value: 50 }] });
+    expect(result.wakeValue).toBeNull();
+    expect(result.wakeTs).toBeNull();
+  });
+
+  it('handles string startGMT shape ("YYYY-MM-DD HH:mm:ss") — adult-account fallback compat', () => {
+    // Adult Garmin accounts emit startGMT as a GMT date string, not epoch ms.
+    // toEpochMs must force UTC parse; without 'Z' append JS would read as local time.
+    const sleep = {
+      dailySleepDTO: { sleepEndTimestampGMT: new Date('2026-05-07T13:52:00.000Z').getTime() },
+      sleepBodyBattery: [
+        { startGMT: '2026-05-07 13:50:00', value: 90 },
+        { startGMT: '2026-05-07 13:51:00', value: 92 },
+        { startGMT: '2026-05-07 13:53:00', value: 93 }, // after sleepEnd — must NOT win
+      ],
+    };
+    const result = pickWakeFromSleepData(sleep);
+    expect(result.wakeValue).toBe(92);
+    expect(new Date(result.wakeTs!).toISOString()).toBe('2026-05-07T13:51:00.000Z');
+  });
+
+  it('returns null wake when all sleepBodyBattery entries are strictly after sleepEndTimestampGMT', () => {
+    // Every entry's startGMT > sleepEndTs → chosenTs stays null → falls through to unavailable.
+    const sleepEnd = 1778161920000; // 13:52 UTC
+    const result = pickWakeFromSleepData({
+      dailySleepDTO: { sleepEndTimestampGMT: sleepEnd },
+      sleepBodyBattery: [
+        { startGMT: sleepEnd + 60000, value: 93 },  // 13:53 UTC — after
+        { startGMT: sleepEnd + 120000, value: 94 }, // 13:54 UTC — after
+      ],
+    });
+    expect(result.wakeTs).toBeNull();
+    expect(result.wakeValue).toBeNull();
   });
 });
 

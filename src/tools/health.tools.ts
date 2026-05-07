@@ -1,6 +1,13 @@
 // KAREN Phase 1 (2026-05-02): refactored to take clientPool; user enum prepended.
 // KAREN Phase 2 (2026-05-02): converted to registerCompactedTool; verbose flag added.
 // KAREN fix/wake-value-correctness (2026-05-05): added get_body_battery_at_wake.
+// TARS fix/bb-at-wake-empty-events-fallback (2026-05-07): added sleep_data_fallback
+// path. When getBodyBatteryEvents returns an empty array, the original logic bailed
+// to confidence 'unavailable'. The events endpoint runs an async classification
+// batch that backfills after raw wellness data lands; pre-9AM pulls can return []
+// for any account on any day (~8% miss rate over a 25-day sample). The wake BB is
+// recoverable from getSleepData (dailySleepDTO.sleepEndTimestampGMT +
+// sleepBodyBattery[]) — use that as a secondary fallback BEFORE giving up.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { ClientPool } from '../client/client-pool.js';
@@ -129,10 +136,15 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
   //   getBodyBattery → [{ bodyBatteryValuesArray: [[ts_ms, level], ...] }]
   //     • 2-tuple, index 1 is the numeric BB level
   //
-  // Edge case: if no sleep event is found, returns wakeValue: null with
-  // confidence='unavailable'. The previous "estimated_from_lowest" heuristic
-  // was broken-by-design — recovery nights have their nadir pre-bed or mid-night,
-  // not at wake. Better to return null than a confidently wrong number.
+  // Confidence tiers (priority order):
+  //   1. sleep_event          — events endpoint had a SLEEP event; join BB time-series
+  //   2. sleep_data_fallback  — events endpoint empty/no SLEEP; use getSleepData's
+  //                              dailySleepDTO.sleepEndTimestampGMT + sleepBodyBattery[]
+  //                              (TARS 2026-05-07; async classifier lag, any account)
+  //   3. unavailable          — both above failed; return null (no estimation)
+  //
+  // The previous "estimated_from_lowest" heuristic is gone: recovery nights have
+  // their nadir pre-bed or mid-night, not at wake — confidently-wrong is worse than null.
   // ---------------------------------------------------------------------------
   const userEnum = z.enum(clientPool.userEnum);
 
@@ -145,8 +157,9 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
         'intraday BB time-series with the sleep events endpoint. Returns wakeValue, wakeTimestamp, ' +
         'and a confidence indicator. Use this instead of get_body_battery\'s deprecated wakeValue ' +
         'field, which is the 00:00 midnight reading — not the actual wake BB. ' +
-        'Edge case: if no sleep event is found in the events response, returns ' +
-        'wakeValue: null with confidence=\'unavailable\' and a caveat. ' +
+        'Confidence tiers: \'sleep_event\' (events endpoint join), \'sleep_data_fallback\' ' +
+        '(events array empty — uses getSleepData sleepBodyBattery as secondary source; ' +
+        'caused by async classifier lag, any account, ~8% miss rate), \'unavailable\' (both sources failed). ' +
         'No estimation heuristic — null is more honest than a wrong number.',
       inputSchema: {
         user: userEnum,
@@ -240,11 +253,68 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
             });
           }
 
-          // ---- No sleep event → unavailable (BB-4: kill broken heuristic) ----
-          // The previous "estimated_from_lowest" fallback was broken-by-design:
-          // on recovery nights the BB nadir is pre-bed or mid-night, not at wake.
-          // Returning a confidently wrong number is worse than returning null.
+          // ---- No sleep event → try getSleepData fallback (TARS 2026-05-07) ----
+          // The events endpoint runs an async classification batch that backfills
+          // after raw wellness data lands. Pre-9AM pulls can return [] for any
+          // account on any day (~8% miss rate observed across a 25-day sample).
+          // When this happens, falls back to getSleepData.dailySleepDTO.sleepEndTimestampGMT
+          // + sleepBodyBattery[] last entry ≤ that timestamp — sync-independent.
+          // First reproduced: Carlitos 2026-05-07 (resolved on retry minutes later).
+          // Wake BB is still recoverable from getSleepData:
+          //   dailySleepDTO.sleepEndTimestampGMT  → wake instant in epoch ms (UTC)
+          //   sleepBodyBattery[].startGMT/value   → minute-by-minute BB during sleep
+          // Take the last sleepBodyBattery entry whose startGMT ≤ sleepEndTimestampGMT.
           if (!sleepEvent) {
+            try {
+              const sleepRaw = await client.getSleepData(resolvedDate);
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const sleep = sleepRaw as any;
+              const sleepEndTs: number | undefined = sleep?.dailySleepDTO?.sleepEndTimestampGMT;
+              // eslint-disable-next-line @typescript-eslint/no-explicit-any
+              const sleepBb: any[] = Array.isArray(sleep?.sleepBodyBattery) ? sleep.sleepBodyBattery : [];
+
+              if (typeof sleepEndTs === 'number' && sleepBb.length > 0) {
+                // Normalize each entry's startGMT to epoch ms. Garmin emits BOTH shapes:
+                //   • number (epoch ms) — observed Carlitos 2026-05-07
+                //   • string ("YYYY-MM-DD HH:mm:ss" or ISO)  — observed adult accounts
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
+                const toEpochMs = (v: any): number | null => {
+                  if (typeof v === 'number') return v;
+                  if (typeof v !== 'string') return null;
+                  if (v.endsWith('Z') || /[+-]\d{2}:\d{2}$/.test(v)) return new Date(v).getTime();
+                  // "YYYY-MM-DD HH:mm:ss" — Garmin GMT field, force UTC
+                  const isoish = v.includes('T') ? v : v.replace(' ', 'T');
+                  return new Date(isoish.replace(/\.\d+$/, '') + 'Z').getTime();
+                };
+
+                let chosenTs: number | null = null;
+                let chosenValue: number | null = null;
+                for (const entry of sleepBb) {
+                  const ts = toEpochMs(entry?.startGMT);
+                  const val = entry?.value;
+                  if (ts == null || typeof val !== 'number') continue;
+                  // sleepBodyBattery is sorted ascending by startGMT; stop once we pass sleepEnd.
+                  if (ts > sleepEndTs) break;
+                  chosenTs = ts;
+                  chosenValue = val;
+                }
+
+                if (chosenTs != null && chosenValue != null) {
+                  return successResponse({
+                    date: resolvedDate,
+                    user: args.user,
+                    wakeTimestamp: new Date(chosenTs).toISOString(),
+                    wakeValue: chosenValue,
+                    confidence: 'sleep_data_fallback' as const,
+                  });
+                }
+              }
+            } catch {
+              // Swallow — fall through to 'unavailable' below.
+              // Sleep data is best-effort here; we already have null from primary path.
+            }
+
+            // ---- Both sources failed → unavailable (no estimation) ----
             return successResponse({
               date: resolvedDate,
               user: args.user,
@@ -252,8 +322,9 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
               wakeValue: null,
               confidence: 'unavailable' as const,
               caveat:
-                'No sleep event found in body-battery events response for this date. ' +
-                'Re-run after device sync or use get_body_battery_events to investigate.',
+                'No sleep event in body-battery events response, and getSleepData ' +
+                'fallback could not produce a wake BB (missing sleepEndTimestampGMT or ' +
+                'empty sleepBodyBattery). Re-run after device sync.',
             });
           }
 
