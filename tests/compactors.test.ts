@@ -668,8 +668,8 @@ describe('get_body_battery_at_wake fixture shape — sleep_event confidence', ()
 });
 
 describe('get_body_battery_at_wake fixture shape — sleep_data_fallback confidence (TARS 2026-05-07)', () => {
-  // sleep_data_fallback: events endpoint empty (Junior account behavior — Carlitos
-  // 2026-05-07), so the tool falls back to getSleepData's sleepBodyBattery array.
+  // sleep_data_fallback: events endpoint empty (async classifier lag — Carlitos
+  // 2026-05-07, resolved on retry minutes later), so the tool falls back to getSleepData's sleepBodyBattery array.
   // Wake BB = last sleepBodyBattery entry whose startGMT ≤ sleepEndTimestampGMT.
   const fixture = wakeAtWakeSleepDataFallback;
 
@@ -970,10 +970,12 @@ describe('get_body_battery_at_wake — real fixture: BB field-name fixes (BB-1/2
 // ---------------------------------------------------------------------------
 // BB at-wake — sleep_data_fallback path (TARS 2026-05-07)
 // Real fixture: Carlitos 2026-05-07 — get_body_battery_events returned [], the
-// previous BB-4 logic bailed to confidence=unavailable. The wake BB is still
-// recoverable via getSleepData (dailySleepDTO.sleepEndTimestampGMT +
-// sleepBodyBattery[] last-entry-≤-sleepEnd). This test mirrors the production
-// algorithm against the captured Junior-account sleep-data shape.
+// previous BB-4 logic bailed to confidence=unavailable. Root cause: async
+// classification batch on Garmin's events endpoint backfills after raw wellness
+// data lands; pre-9AM pulls can return [] for any account on any day (~8% miss
+// rate over a 25-day sample). The wake BB is recoverable via getSleepData
+// (dailySleepDTO.sleepEndTimestampGMT + sleepBodyBattery[] last-entry-≤-sleepEnd).
+// This test exercises the same algorithm against the real captured fixture data.
 // ---------------------------------------------------------------------------
 
 /**
@@ -1012,10 +1014,10 @@ function pickWakeFromSleepData(sleep: any): { wakeTs: number | null; wakeValue: 
 }
 
 describe('get_body_battery_at_wake — sleep_data_fallback algorithm (Carlitos 2026-05-07 real fixture)', () => {
-  // Junior-account upstream shape: dailySleepDTO.sleepEndTimestampGMT is epoch ms (number),
-  // sleepBodyBattery[].startGMT is epoch ms (number). Adult accounts emit string for startGMT;
-  // toEpochMs handles both.
-  it('sleepEndTimestampGMT is a number (Junior-account shape)', () => {
+  // Fixture shape (Carlitos 2026-05-07): dailySleepDTO.sleepEndTimestampGMT is epoch ms (number),
+  // sleepBodyBattery[].startGMT is epoch ms (number). Other accounts may emit string for startGMT;
+  // toEpochMs handles both shapes.
+  it('sleepEndTimestampGMT is a number (epoch ms fixture shape)', () => {
     expect(typeof (sleepDataCarlitos20260507 as any).dailySleepDTO.sleepEndTimestampGMT).toBe('number');
     expect((sleepDataCarlitos20260507 as any).dailySleepDTO.sleepEndTimestampGMT).toBe(1778161920000);
   });

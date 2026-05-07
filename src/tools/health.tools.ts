@@ -2,11 +2,12 @@
 // KAREN Phase 2 (2026-05-02): converted to registerCompactedTool; verbose flag added.
 // KAREN fix/wake-value-correctness (2026-05-05): added get_body_battery_at_wake.
 // TARS fix/bb-at-wake-empty-events-fallback (2026-05-07): added sleep_data_fallback
-// path. When getBodyBatteryEvents returns an empty array (observed on Junior
-// accounts e.g. Carlitos 2026-05-07), the original logic bailed to confidence
-// 'unavailable'. The wake BB is recoverable from getSleepData
-// (dailySleepDTO.sleepEndTimestampGMT + sleepBodyBattery[]) — use that as a
-// secondary fallback BEFORE giving up.
+// path. When getBodyBatteryEvents returns an empty array, the original logic bailed
+// to confidence 'unavailable'. The events endpoint runs an async classification
+// batch that backfills after raw wellness data lands; pre-9AM pulls can return []
+// for any account on any day (~8% miss rate over a 25-day sample). The wake BB is
+// recoverable from getSleepData (dailySleepDTO.sleepEndTimestampGMT +
+// sleepBodyBattery[]) — use that as a secondary fallback BEFORE giving up.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import type { ClientPool } from '../client/client-pool.js';
@@ -139,7 +140,7 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
   //   1. sleep_event          — events endpoint had a SLEEP event; join BB time-series
   //   2. sleep_data_fallback  — events endpoint empty/no SLEEP; use getSleepData's
   //                              dailySleepDTO.sleepEndTimestampGMT + sleepBodyBattery[]
-  //                              (TARS 2026-05-07; Junior accounts often emit [] events)
+  //                              (TARS 2026-05-07; async classifier lag, any account)
   //   3. unavailable          — both above failed; return null (no estimation)
   //
   // The previous "estimated_from_lowest" heuristic is gone: recovery nights have
@@ -158,7 +159,7 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
         'field, which is the 00:00 midnight reading — not the actual wake BB. ' +
         'Confidence tiers: \'sleep_event\' (events endpoint join), \'sleep_data_fallback\' ' +
         '(events array empty — uses getSleepData sleepBodyBattery as secondary source; ' +
-        'common on Junior accounts), \'unavailable\' (both sources failed). ' +
+        'caused by async classifier lag, any account, ~8% miss rate), \'unavailable\' (both sources failed). ' +
         'No estimation heuristic — null is more honest than a wrong number.',
       inputSchema: {
         user: userEnum,
@@ -253,8 +254,12 @@ export function registerHealthTools(server: McpServer, clientPool: ClientPool): 
           }
 
           // ---- No sleep event → try getSleepData fallback (TARS 2026-05-07) ----
-          // The events endpoint is empty/missing a SLEEP entry on some accounts
-          // (notably Junior accounts — confirmed Carlitos 2026-05-07).
+          // The events endpoint runs an async classification batch that backfills
+          // after raw wellness data lands. Pre-9AM pulls can return [] for any
+          // account on any day (~8% miss rate observed across a 25-day sample).
+          // When this happens, falls back to getSleepData.dailySleepDTO.sleepEndTimestampGMT
+          // + sleepBodyBattery[] last entry ≤ that timestamp — sync-independent.
+          // First reproduced: Carlitos 2026-05-07 (resolved on retry minutes later).
           // Wake BB is still recoverable from getSleepData:
           //   dailySleepDTO.sleepEndTimestampGMT  → wake instant in epoch ms (UTC)
           //   sleepBodyBattery[].startGMT/value   → minute-by-minute BB during sleep
