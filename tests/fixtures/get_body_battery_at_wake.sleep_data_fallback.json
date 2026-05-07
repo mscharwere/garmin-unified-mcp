@@ -1,0 +1,8 @@
+{
+  "_comment": "Fixture: 2026-05-07 Carlitos. sleep_data_fallback path: get_body_battery_events returned [] (Junior-account behavior), so the tool falls back to getSleepData. dailySleepDTO.sleepEndTimestampGMT=1778161920000 (13:52 UTC = 6:52 AM PST). Last sleepBodyBattery entry whose startGMT ≤ sleepEndTimestampGMT: 1778161860000 (13:51 UTC, value 92). wakeValue=92 matches Garmin Connect mobile app for the day. confidence='sleep_data_fallback' is the new tier between 'sleep_event' (primary) and 'unavailable' (last resort).",
+  "date": "2026-05-07",
+  "user": "carlitos",
+  "wakeTimestamp": "2026-05-07T13:51:00.000Z",
+  "wakeValue": 92,
+  "confidence": "sleep_data_fallback"
+}
