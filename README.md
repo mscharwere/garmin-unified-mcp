@@ -18,17 +18,30 @@ Architecture design: `C:/Jarvis/Team/TARS/garmin_unified_mcp_design.md`
 
 ## Configuration
 
-### Environment variables
+### Credentials live in `.env` (not `.mcp.json`)
+
+As of 2026-05-07, credentials are loaded from a `.env` file in the repo root via `dotenv.config()` at startup. `.env` is gitignored. The MCP entry in `.mcp.json` no longer needs an `env` block — it just launches the `node` process and the server reads its own `.env`.
+
+**Setup:**
+
+```bash
+cp .env.example .env
+# Edit .env, fill in GARMIN_USERS JSON + GARMIN_TOKEN_ROOT
+```
+
+`.env` format (see `.env.example`):
+
+```dotenv
+GARMIN_USERS=[{"id":"carlos","email":"...","password":"..."},{"id":"carlitos",...},{"id":"daniel",...}]
+GARMIN_TOKEN_ROOT=C:\Users\mscha\.garmin-mcp-unified
+```
+
+**Minimal `.mcp.json` entry** (no inline secrets):
 
 ```jsonc
-// In .mcp.json
 "garmin": {
   "command": "node",
-  "args": ["C:\\repos\\garmin-unified-mcp\\build\\index.js"],
-  "env": {
-    "GARMIN_USERS": "[{\"id\":\"carlos\",\"email\":\"carlos@example.com\",\"password\":\"...\"},{\"id\":\"carlitos\",\"email\":\"carlitos@example.com\",\"password\":\"...\"},{\"id\":\"daniel\",\"email\":\"daniel@example.com\",\"password\":\"...\"}]",
-    "GARMIN_TOKEN_ROOT": "C:\\Users\\mscha\\.garmin-mcp-unified"
-  }
+  "args": ["C:\\repos\\garmin-unified-mcp\\build\\index.js"]
 }
 ```
 
@@ -127,20 +140,18 @@ The original per-user MCP directories must still exist (keep for 1 week post-cut
 
 **Note:** The token-cache copy in `${GARMIN_TOKEN_ROOT}/${userId}/` is a copy — originals remain untouched. Deletion of originals is one-way. Do not delete until rollback window expires (1 week minimum from cutover AND after BAYMAX morning + COLOSSUS post-game flows confirmed working with new MCP).
 
-### Scenario: `.mcp.json` env shape reference
+### Scenario: `.mcp.json` shape reference (post-2026-05-07 .env migration)
 
 ```jsonc
 {
   "garmin": {
     "command": "node",
-    "args": ["C:\\repos\\garmin-unified-mcp\\build\\index.js"],
-    "env": {
-      "GARMIN_USERS": "[{\"id\":\"carlos\",\"email\":\"...\",\"password\":\"...\"},{\"id\":\"carlitos\",\"email\":\"...\",\"password\":\"...\"},{\"id\":\"daniel\",\"email\":\"...\",\"password\":\"...\"}]",
-      "GARMIN_TOKEN_ROOT": "C:\\Users\\mscha\\.garmin-mcp-unified"
-    }
+    "args": ["C:\\repos\\garmin-unified-mcp\\build\\index.js"]
   }
 }
 ```
+
+Credentials live in `.env` at the repo root — see Configuration section.
 
 ### Scenario: circuit breaker stuck open for a user
 
