@@ -2,6 +2,15 @@
 // Replaces single GarminClient with ClientPool — all users served from one process.
 // Server name: garmin-unified-mcp v1.0.0
 // See: C:/Jarvis/Team/TARS/garmin_unified_mcp_design.md (§2, §3, §4)
+
+// TARS 2026-05-07: Load credentials from .env BEFORE any module-level code
+// references process.env.GARMIN_*. dotenv.config() is the FIRST executable
+// statement so the ClientPool sees populated env vars at construction time.
+// .env lives in the repo root (gitignored) and supplies GARMIN_USERS +
+// GARMIN_TOKEN_ROOT — see .env.example for the contract.
+import dotenv from 'dotenv';
+dotenv.config();
+
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { buildClientPool } from './client/client-pool.js';
