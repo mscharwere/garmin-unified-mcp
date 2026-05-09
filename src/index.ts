@@ -8,8 +8,19 @@
 // statement so the ClientPool sees populated env vars at construction time.
 // .env lives in the repo root (gitignored) and supplies GARMIN_USERS +
 // GARMIN_TOKEN_ROOT — see .env.example for the contract.
+//
+// KAREN 2026-05-08 (hotfix on a9f7f62): Resolve .env relative to THIS script's
+// location, not process.cwd(). Claude Code spawns the MCP from .mcp.json's
+// directory (e.g. C:\Jarvis\), not the repo root, so a bare dotenv.config()
+// looked for a non-existent C:\Jarvis\.env, ClientPool threw "GARMIN_USERS
+// env var is required", and the MCP failed to register. Build emits to
+// build/index.js, so '..' from __dirname resolves to <repo>/.env.
 import dotenv from 'dotenv';
-dotenv.config();
+import { fileURLToPath } from 'url';
+import path from 'path';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+dotenv.config({ path: path.join(__dirname, '..', '.env') });
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
